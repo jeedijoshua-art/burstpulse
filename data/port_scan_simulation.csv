@@ -1,0 +1,251 @@
+interval,timestamp,packet_count,scenario_label,has_attack_label,attack_type
+1,2026-10-15 10:00:00,13,Benign Traffic,False,BENIGN
+2,2026-10-15 10:00:10,19,Benign Traffic,False,BENIGN
+3,2026-10-15 10:00:20,13,Benign Traffic,False,BENIGN
+4,2026-10-15 10:00:30,16,Benign Traffic,False,BENIGN
+5,2026-10-15 10:00:40,13,Benign Traffic,False,BENIGN
+6,2026-10-15 10:00:50,15,Benign Traffic,False,BENIGN
+7,2026-10-15 10:01:00,16,Benign Traffic,False,BENIGN
+8,2026-10-15 10:01:10,10,Benign Traffic,False,BENIGN
+9,2026-10-15 10:01:20,22,Benign Traffic,False,BENIGN
+10,2026-10-15 10:01:30,10,Benign Traffic,False,BENIGN
+11,2026-10-15 10:01:40,17,Benign Traffic,False,BENIGN
+12,2026-10-15 10:01:50,12,Benign Traffic,False,BENIGN
+13,2026-10-15 10:02:00,14,Benign Traffic,False,BENIGN
+14,2026-10-15 10:02:10,11,Benign Traffic,False,BENIGN
+15,2026-10-15 10:02:20,17,Benign Traffic,False,BENIGN
+16,2026-10-15 10:02:30,10,Benign Traffic,False,BENIGN
+17,2026-10-15 10:02:40,6,Benign Traffic,False,BENIGN
+18,2026-10-15 10:02:50,9,Benign Traffic,False,BENIGN
+19,2026-10-15 10:03:00,9,Benign Traffic,False,BENIGN
+20,2026-10-15 10:03:10,17,Benign Traffic,False,BENIGN
+21,2026-10-15 10:03:20,21,Benign Traffic,False,BENIGN
+22,2026-10-15 10:03:30,14,Benign Traffic,False,BENIGN
+23,2026-10-15 10:03:40,16,Benign Traffic,False,BENIGN
+24,2026-10-15 10:03:50,11,Benign Traffic,False,BENIGN
+25,2026-10-15 10:04:00,16,Benign Traffic,False,BENIGN
+26,2026-10-15 10:04:10,11,Benign Traffic,False,BENIGN
+27,2026-10-15 10:04:20,14,Benign Traffic,False,BENIGN
+28,2026-10-15 10:04:30,17,Benign Traffic,False,BENIGN
+29,2026-10-15 10:04:40,17,Benign Traffic,False,BENIGN
+30,2026-10-15 10:04:50,12,Benign Traffic,False,BENIGN
+31,2026-10-15 10:05:00,20,Benign Traffic,False,BENIGN
+32,2026-10-15 10:05:10,17,Benign Traffic,False,BENIGN
+33,2026-10-15 10:05:20,17,Benign Traffic,False,BENIGN
+34,2026-10-15 10:05:30,18,Benign Traffic,False,BENIGN
+35,2026-10-15 10:05:40,12,Benign Traffic,False,BENIGN
+36,2026-10-15 10:05:50,17,Benign Traffic,False,BENIGN
+37,2026-10-15 10:06:00,18,Benign Traffic,False,BENIGN
+38,2026-10-15 10:06:10,21,Benign Traffic,False,BENIGN
+39,2026-10-15 10:06:20,20,Benign Traffic,False,BENIGN
+40,2026-10-15 10:06:30,10,Benign Traffic,False,BENIGN
+41,2026-10-15 10:06:40,18,Benign Traffic,False,BENIGN
+42,2026-10-15 10:06:50,10,Benign Traffic,False,BENIGN
+43,2026-10-15 10:07:00,13,Benign Traffic,False,BENIGN
+44,2026-10-15 10:07:10,19,Benign Traffic,False,BENIGN
+45,2026-10-15 10:07:20,11,Benign Traffic,False,BENIGN
+46,2026-10-15 10:07:30,23,Benign Traffic,False,BENIGN
+47,2026-10-15 10:07:40,16,Benign Traffic,False,BENIGN
+48,2026-10-15 10:07:50,19,Benign Traffic,False,BENIGN
+49,2026-10-15 10:08:00,12,Benign Traffic,False,BENIGN
+50,2026-10-15 10:08:10,23,Benign Traffic,False,BENIGN
+51,2026-10-15 10:08:20,14,Benign Traffic,False,BENIGN
+52,2026-10-15 10:08:30,15,Benign Traffic,False,BENIGN
+53,2026-10-15 10:08:40,15,Benign Traffic,False,BENIGN
+54,2026-10-15 10:08:50,16,Benign Traffic,False,BENIGN
+55,2026-10-15 10:09:00,13,Benign Traffic,False,BENIGN
+56,2026-10-15 10:09:10,14,Benign Traffic,False,BENIGN
+57,2026-10-15 10:09:20,26,Benign Traffic,False,BENIGN
+58,2026-10-15 10:09:30,12,Benign Traffic,False,BENIGN
+59,2026-10-15 10:09:40,15,Benign Traffic,False,BENIGN
+60,2026-10-15 10:09:50,8,Benign Traffic,False,BENIGN
+61,2026-10-15 10:10:00,17,Benign Traffic,False,BENIGN
+62,2026-10-15 10:10:10,16,Benign Traffic,False,BENIGN
+63,2026-10-15 10:10:20,12,Benign Traffic,False,BENIGN
+64,2026-10-15 10:10:30,14,Benign Traffic,False,BENIGN
+65,2026-10-15 10:10:40,14,Benign Traffic,False,BENIGN
+66,2026-10-15 10:10:50,21,Benign Traffic,False,BENIGN
+67,2026-10-15 10:11:00,18,Benign Traffic,False,BENIGN
+68,2026-10-15 10:11:10,9,Benign Traffic,False,BENIGN
+69,2026-10-15 10:11:20,14,Benign Traffic,False,BENIGN
+70,2026-10-15 10:11:30,10,Benign Traffic,False,BENIGN
+71,2026-10-15 10:11:40,16,Benign Traffic,False,BENIGN
+72,2026-10-15 10:11:50,11,Benign Traffic,False,BENIGN
+73,2026-10-15 10:12:00,11,Benign Traffic,False,BENIGN
+74,2026-10-15 10:12:10,19,Benign Traffic,False,BENIGN
+75,2026-10-15 10:12:20,19,Benign Traffic,False,BENIGN
+76,2026-10-15 10:12:30,18,Benign Traffic,False,BENIGN
+77,2026-10-15 10:12:40,13,Benign Traffic,False,BENIGN
+78,2026-10-15 10:12:50,12,Benign Traffic,False,BENIGN
+79,2026-10-15 10:13:00,19,Benign Traffic,False,BENIGN
+80,2026-10-15 10:13:10,13,Benign Traffic,False,BENIGN
+81,2026-10-15 10:13:20,15,Benign Traffic,False,BENIGN
+82,2026-10-15 10:13:30,15,Benign Traffic,False,BENIGN
+83,2026-10-15 10:13:40,11,Benign Traffic,False,BENIGN
+84,2026-10-15 10:13:50,16,Benign Traffic,False,BENIGN
+85,2026-10-15 10:14:00,24,Benign Traffic,False,BENIGN
+86,2026-10-15 10:14:10,12,Benign Traffic,False,BENIGN
+87,2026-10-15 10:14:20,18,Benign Traffic,False,BENIGN
+88,2026-10-15 10:14:30,21,Benign Traffic,False,BENIGN
+89,2026-10-15 10:14:40,11,Benign Traffic,False,BENIGN
+90,2026-10-15 10:14:50,12,Benign Traffic,False,BENIGN
+91,2026-10-15 10:15:00,13,Benign Traffic,False,BENIGN
+92,2026-10-15 10:15:10,16,Benign Traffic,False,BENIGN
+93,2026-10-15 10:15:20,14,Benign Traffic,False,BENIGN
+94,2026-10-15 10:15:30,21,Benign Traffic,False,BENIGN
+95,2026-10-15 10:15:40,15,Benign Traffic,False,BENIGN
+96,2026-10-15 10:15:50,10,Benign Traffic,False,BENIGN
+97,2026-10-15 10:16:00,16,Benign Traffic,False,BENIGN
+98,2026-10-15 10:16:10,21,Benign Traffic,False,BENIGN
+99,2026-10-15 10:16:20,10,Benign Traffic,False,BENIGN
+100,2026-10-15 10:16:30,21,Benign Traffic,False,BENIGN
+101,2026-10-15 10:16:40,19,Benign Traffic,False,BENIGN
+102,2026-10-15 10:16:50,15,Benign Traffic,False,BENIGN
+103,2026-10-15 10:17:00,13,Benign Traffic,False,BENIGN
+104,2026-10-15 10:17:10,21,Benign Traffic,False,BENIGN
+105,2026-10-15 10:17:20,9,Benign Traffic,False,BENIGN
+106,2026-10-15 10:17:30,12,Benign Traffic,False,BENIGN
+107,2026-10-15 10:17:40,17,Benign Traffic,False,BENIGN
+108,2026-10-15 10:17:50,15,Benign Traffic,False,BENIGN
+109,2026-10-15 10:18:00,14,Benign Traffic,False,BENIGN
+110,2026-10-15 10:18:10,11,Benign Traffic,False,BENIGN
+111,2026-10-15 10:18:20,13,Benign Traffic,False,BENIGN
+112,2026-10-15 10:18:30,13,Benign Traffic,False,BENIGN
+113,2026-10-15 10:18:40,18,Benign Traffic,False,BENIGN
+114,2026-10-15 10:18:50,11,Benign Traffic,False,BENIGN
+115,2026-10-15 10:19:00,18,Benign Traffic,False,BENIGN
+116,2026-10-15 10:19:10,19,Benign Traffic,False,BENIGN
+117,2026-10-15 10:19:20,15,Benign Traffic,False,BENIGN
+118,2026-10-15 10:19:30,15,Benign Traffic,False,BENIGN
+119,2026-10-15 10:19:40,19,Benign Traffic,False,BENIGN
+120,2026-10-15 10:19:50,10,Benign Traffic,False,BENIGN
+121,2026-10-15 10:20:00,16,Benign Traffic,False,BENIGN
+122,2026-10-15 10:20:10,16,Benign Traffic,False,BENIGN
+123,2026-10-15 10:20:20,10,Benign Traffic,False,BENIGN
+124,2026-10-15 10:20:30,15,Benign Traffic,False,BENIGN
+125,2026-10-15 10:20:40,11,Benign Traffic,False,BENIGN
+126,2026-10-15 10:20:50,19,Benign Traffic,False,BENIGN
+127,2026-10-15 10:21:00,11,Benign Traffic,False,BENIGN
+128,2026-10-15 10:21:10,13,Benign Traffic,False,BENIGN
+129,2026-10-15 10:21:20,15,Benign Traffic,False,BENIGN
+130,2026-10-15 10:21:30,10,Benign Traffic,False,BENIGN
+131,2026-10-15 10:21:40,19,Benign Traffic,False,BENIGN
+132,2026-10-15 10:21:50,16,Benign Traffic,False,BENIGN
+133,2026-10-15 10:22:00,27,Benign Traffic,False,BENIGN
+134,2026-10-15 10:22:10,17,Benign Traffic,False,BENIGN
+135,2026-10-15 10:22:20,10,Benign Traffic,False,BENIGN
+136,2026-10-15 10:22:30,16,Benign Traffic,False,BENIGN
+137,2026-10-15 10:22:40,18,Benign Traffic,False,BENIGN
+138,2026-10-15 10:22:50,18,Benign Traffic,False,BENIGN
+139,2026-10-15 10:23:00,15,Benign Traffic,False,BENIGN
+140,2026-10-15 10:23:10,13,Benign Traffic,False,BENIGN
+141,2026-10-15 10:23:20,16,Benign Traffic,False,BENIGN
+142,2026-10-15 10:23:30,20,Benign Traffic,False,BENIGN
+143,2026-10-15 10:23:40,11,Benign Traffic,False,BENIGN
+144,2026-10-15 10:23:50,16,Benign Traffic,False,BENIGN
+145,2026-10-15 10:24:00,17,Benign Traffic,False,BENIGN
+146,2026-10-15 10:24:10,18,Benign Traffic,False,BENIGN
+147,2026-10-15 10:24:20,16,Benign Traffic,False,BENIGN
+148,2026-10-15 10:24:30,12,Benign Traffic,False,BENIGN
+149,2026-10-15 10:24:40,14,Benign Traffic,False,BENIGN
+150,2026-10-15 10:24:50,14,Benign Traffic,False,BENIGN
+151,2026-10-15 10:25:00,46,Port Scan Probe,True,PortScan
+152,2026-10-15 10:25:10,57,Port Scan Probe,True,PortScan
+153,2026-10-15 10:25:20,61,Port Scan Probe,True,PortScan
+154,2026-10-15 10:25:30,63,Port Scan Probe,True,PortScan
+155,2026-10-15 10:25:40,70,Port Scan Probe,True,PortScan
+156,2026-10-15 10:25:50,55,Port Scan Probe,True,PortScan
+157,2026-10-15 10:26:00,80,Port Scan Probe,True,PortScan
+158,2026-10-15 10:26:10,54,Port Scan Probe,True,PortScan
+159,2026-10-15 10:26:20,52,Port Scan Probe,True,PortScan
+160,2026-10-15 10:26:30,60,Port Scan Probe,True,PortScan
+161,2026-10-15 10:26:40,48,Port Scan Probe,True,PortScan
+162,2026-10-15 10:26:50,69,Port Scan Probe,True,PortScan
+163,2026-10-15 10:27:00,18,Benign Traffic,False,BENIGN
+164,2026-10-15 10:27:10,16,Benign Traffic,False,BENIGN
+165,2026-10-15 10:27:20,13,Benign Traffic,False,BENIGN
+166,2026-10-15 10:27:30,15,Benign Traffic,False,BENIGN
+167,2026-10-15 10:27:40,10,Benign Traffic,False,BENIGN
+168,2026-10-15 10:27:50,15,Benign Traffic,False,BENIGN
+169,2026-10-15 10:28:00,12,Benign Traffic,False,BENIGN
+170,2026-10-15 10:28:10,15,Benign Traffic,False,BENIGN
+171,2026-10-15 10:28:20,12,Benign Traffic,False,BENIGN
+172,2026-10-15 10:28:30,19,Benign Traffic,False,BENIGN
+173,2026-10-15 10:28:40,15,Benign Traffic,False,BENIGN
+174,2026-10-15 10:28:50,24,Benign Traffic,False,BENIGN
+175,2026-10-15 10:29:00,13,Benign Traffic,False,BENIGN
+176,2026-10-15 10:29:10,18,Benign Traffic,False,BENIGN
+177,2026-10-15 10:29:20,10,Benign Traffic,False,BENIGN
+178,2026-10-15 10:29:30,25,Benign Traffic,False,BENIGN
+179,2026-10-15 10:29:40,17,Benign Traffic,False,BENIGN
+180,2026-10-15 10:29:50,12,Benign Traffic,False,BENIGN
+181,2026-10-15 10:30:00,16,Benign Traffic,False,BENIGN
+182,2026-10-15 10:30:10,11,Benign Traffic,False,BENIGN
+183,2026-10-15 10:30:20,13,Benign Traffic,False,BENIGN
+184,2026-10-15 10:30:30,16,Benign Traffic,False,BENIGN
+185,2026-10-15 10:30:40,23,Benign Traffic,False,BENIGN
+186,2026-10-15 10:30:50,54,Port Scan Probe,True,PortScan
+187,2026-10-15 10:31:00,49,Port Scan Probe,True,PortScan
+188,2026-10-15 10:31:10,76,Port Scan Probe,True,PortScan
+189,2026-10-15 10:31:20,72,Port Scan Probe,True,PortScan
+190,2026-10-15 10:31:30,68,Port Scan Probe,True,PortScan
+191,2026-10-15 10:31:40,43,Port Scan Probe,True,PortScan
+192,2026-10-15 10:31:50,54,Port Scan Probe,True,PortScan
+193,2026-10-15 10:32:00,62,Port Scan Probe,True,PortScan
+194,2026-10-15 10:32:10,62,Port Scan Probe,True,PortScan
+195,2026-10-15 10:32:20,61,Port Scan Probe,True,PortScan
+196,2026-10-15 10:32:30,19,Benign Traffic,False,BENIGN
+197,2026-10-15 10:32:40,15,Benign Traffic,False,BENIGN
+198,2026-10-15 10:32:50,19,Benign Traffic,False,BENIGN
+199,2026-10-15 10:33:00,11,Benign Traffic,False,BENIGN
+200,2026-10-15 10:33:10,23,Benign Traffic,False,BENIGN
+201,2026-10-15 10:33:20,15,Benign Traffic,False,BENIGN
+202,2026-10-15 10:33:30,11,Benign Traffic,False,BENIGN
+203,2026-10-15 10:33:40,16,Benign Traffic,False,BENIGN
+204,2026-10-15 10:33:50,18,Benign Traffic,False,BENIGN
+205,2026-10-15 10:34:00,13,Benign Traffic,False,BENIGN
+206,2026-10-15 10:34:10,19,Benign Traffic,False,BENIGN
+207,2026-10-15 10:34:20,17,Benign Traffic,False,BENIGN
+208,2026-10-15 10:34:30,18,Benign Traffic,False,BENIGN
+209,2026-10-15 10:34:40,12,Benign Traffic,False,BENIGN
+210,2026-10-15 10:34:50,15,Benign Traffic,False,BENIGN
+211,2026-10-15 10:35:00,15,Benign Traffic,False,BENIGN
+212,2026-10-15 10:35:10,11,Benign Traffic,False,BENIGN
+213,2026-10-15 10:35:20,11,Benign Traffic,False,BENIGN
+214,2026-10-15 10:35:30,9,Benign Traffic,False,BENIGN
+215,2026-10-15 10:35:40,13,Benign Traffic,False,BENIGN
+216,2026-10-15 10:35:50,54,Port Scan Probe,True,PortScan
+217,2026-10-15 10:36:00,65,Port Scan Probe,True,PortScan
+218,2026-10-15 10:36:10,56,Port Scan Probe,True,PortScan
+219,2026-10-15 10:36:20,59,Port Scan Probe,True,PortScan
+220,2026-10-15 10:36:30,46,Port Scan Probe,True,PortScan
+221,2026-10-15 10:36:40,56,Port Scan Probe,True,PortScan
+222,2026-10-15 10:36:50,65,Port Scan Probe,True,PortScan
+223,2026-10-15 10:37:00,54,Port Scan Probe,True,PortScan
+224,2026-10-15 10:37:10,69,Port Scan Probe,True,PortScan
+225,2026-10-15 10:37:20,64,Port Scan Probe,True,PortScan
+226,2026-10-15 10:37:30,11,Benign Traffic,False,BENIGN
+227,2026-10-15 10:37:40,12,Benign Traffic,False,BENIGN
+228,2026-10-15 10:37:50,12,Benign Traffic,False,BENIGN
+229,2026-10-15 10:38:00,10,Benign Traffic,False,BENIGN
+230,2026-10-15 10:38:10,15,Benign Traffic,False,BENIGN
+231,2026-10-15 10:38:20,16,Benign Traffic,False,BENIGN
+232,2026-10-15 10:38:30,18,Benign Traffic,False,BENIGN
+233,2026-10-15 10:38:40,16,Benign Traffic,False,BENIGN
+234,2026-10-15 10:38:50,16,Benign Traffic,False,BENIGN
+235,2026-10-15 10:39:00,20,Benign Traffic,False,BENIGN
+236,2026-10-15 10:39:10,17,Benign Traffic,False,BENIGN
+237,2026-10-15 10:39:20,16,Benign Traffic,False,BENIGN
+238,2026-10-15 10:39:30,13,Benign Traffic,False,BENIGN
+239,2026-10-15 10:39:40,12,Benign Traffic,False,BENIGN
+240,2026-10-15 10:39:50,15,Benign Traffic,False,BENIGN
+241,2026-10-15 10:40:00,16,Benign Traffic,False,BENIGN
+242,2026-10-15 10:40:10,12,Benign Traffic,False,BENIGN
+243,2026-10-15 10:40:20,17,Benign Traffic,False,BENIGN
+244,2026-10-15 10:40:30,21,Benign Traffic,False,BENIGN
+245,2026-10-15 10:40:40,11,Benign Traffic,False,BENIGN
+246,2026-10-15 10:40:50,12,Benign Traffic,False,BENIGN
+247,2026-10-15 10:41:00,8,Benign Traffic,False,BENIGN
+248,2026-10-15 10:41:10,20,Benign Traffic,False,BENIGN
+249,2026-10-15 10:41:20,17,Benign Traffic,False,BENIGN
+250,2026-10-15 10:41:30,15,Benign Traffic,False,BENIGN

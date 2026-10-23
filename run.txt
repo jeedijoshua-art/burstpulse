@@ -1,0 +1,8 @@
+# 1. Navigate to repository
+cd /Users/jeedijoshua/Desktop/network_traffic_burst_mvp
+
+# 2. Activate virtual environment
+source .venv/bin/activate
+
+# 3. Launch Streamlit application
+streamlit run app.py
