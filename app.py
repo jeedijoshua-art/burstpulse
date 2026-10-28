@@ -50,11 +50,19 @@ from investigation_workflow import (
     AnalystAssessment,
     ASSESSMENT_MARKERS,
     AnalystReview,
+    InvestigationGroup,
     get_dataset_reviews,
     save_analyst_review,
     reset_demo_reviews,
+    ensure_groups_state,
+    get_dataset_groups,
+    save_investigation_group,
+    delete_investigation_group,
+    reset_demo_groups,
+    calculate_group_analytics,
     run_automated_demo_workflow,
     generate_single_burst_report_markdown,
+    generate_group_investigation_report_markdown,
     generate_summary_investigation_report_markdown,
     get_investigative_recommendations
 )
@@ -743,12 +751,14 @@ def render_analyzer_page():
     else:
         dataset_key = "default_traffic_session"
 
-    # Retrieve reviews database for this dataset
+    # Retrieve reviews and investigation groups for this dataset
     reviews_map = get_dataset_reviews(st.session_state, dataset_key)
+    groups_map = get_dataset_groups(st.session_state, dataset_key)
 
     # Calculate review counts
     flagged_df = eval_df[eval_df["is_burst"]].copy()
     total_flagged = len(flagged_df)
+    flagged_intervals = flagged_df["interval"].tolist() if not flagged_df.empty else []
 
     count_benign = sum(1 for r in reviews_map.values() if r.assessment == AnalystAssessment.LIKELY_BENIGN.value)
     count_suspected = sum(1 for r in reviews_map.values() if r.assessment == AnalystAssessment.SUSPECTED_ATTACK.value)
@@ -768,6 +778,8 @@ def render_analyzer_page():
             demo_res = run_automated_demo_workflow(st.session_state, dataset_key, analysis)
             if demo_res["success"]:
                 st.session_state["demo_banner"] = ("success", demo_res["message"])
+                if demo_res.get("active_group_id"):
+                    st.session_state["selected_investigation_group_id"] = demo_res["active_group_id"]
                 if demo_res.get("demo_intervals"):
                     st.session_state["selected_investigation_interval"] = demo_res["demo_intervals"][0]
             else:
@@ -775,9 +787,10 @@ def render_analyzer_page():
             st.rerun()
 
     with triage_col2:
-        if st.button("🔄 Reset Demo Records", key="btn_reset_demo_records", help="Remove simulated demo records while preserving all genuine analyst reviews."):
-            num_reset = reset_demo_reviews(st.session_state, dataset_key)
-            st.session_state["demo_banner"] = ("info", f"Reset complete: Removed {num_reset} demo records. Genuine analyst reviews preserved.")
+        if st.button("🔄 Reset Demo Records", key="btn_reset_demo_records", help="Remove simulated demo records while preserving all genuine analyst reviews and groups."):
+            num_reset_reviews = reset_demo_reviews(st.session_state, dataset_key)
+            num_reset_groups = reset_demo_groups(st.session_state, dataset_key)
+            st.session_state["demo_banner"] = ("info", f"Reset complete: Removed {num_reset_reviews} demo reviews and {num_reset_groups} demo groups. Genuine analyst investigations preserved.")
             st.rerun()
 
     with triage_col3:
@@ -802,17 +815,18 @@ def render_analyzer_page():
         </div>
         """, unsafe_allow_html=True)
 
+    # Immediately visible demo notification & demo showcase container
     if "demo_banner" in st.session_state:
         b_type, b_msg = st.session_state["demo_banner"]
         if b_type == "success":
-            st.success(f"**DEMO ACTIVE:** {b_msg}")
+            st.success(f"**DEMO ACTIVE — SIMULATED ANALYST REVIEW:** {b_msg}")
         elif b_type == "warning":
             st.warning(b_msg)
         else:
             st.info(b_msg)
 
     # -------------------------------------------------------------------------
-    # WORKFLOW STEP 2: RESTORED TRAFFIC GRAPH (VISIBLE ON MAIN SCREEN)
+    # WORKFLOW STEP 2: CLEAN & PROFESSIONAL TRAFFIC GRAPH (PHASE 6)
     # -------------------------------------------------------------------------
     st.subheader("📈 Traffic Arrival Time Series & Multi-State Classification")
     st.caption(
@@ -822,32 +836,29 @@ def render_analyzer_page():
 
     fig_main = go.Figure()
 
-    # 1. Baseline calibration trace
+    # 1. Baseline calibration trace (clean continuous line)
     fig_main.add_trace(go.Scatter(
         x=base_df["interval"],
         y=base_df["packet_count"],
-        mode="lines+markers",
-        name="Baseline Calibration (λ̂ Estimator)",
-        line=dict(color="#4f46e5", width=2),
-        marker=dict(size=3.5, color="#4f46e5"),
-        hovertemplate="<b>Interval:</b> %{x}<br><b>Count:</b> %{y} " + analysis.measurement_unit + "<br><b>Segment:</b> Baseline Partition<extra></extra>"
+        mode="lines",
+        name="Baseline Calibration (λ̂)",
+        line=dict(color="#4f46e5", width=2.0),
+        hovertemplate="<b>Baseline Window</b><br><b>Interval:</b> %{x}<br><b>Count:</b> %{y} " + analysis.measurement_unit + "<extra></extra>"
     ))
 
-    # 2. Continuous evaluated trace (Normal observations)
+    # 2. Continuous evaluated trace (Normal observations rendered cleanly without marker clumping)
     fig_main.add_trace(go.Scatter(
         x=eval_df["interval"],
         y=eval_df["packet_count"],
-        mode="lines+markers",
-        name="Evaluated Observations",
-        line=dict(color="#64748b", width=1.8),
-        marker=dict(size=3.5, color="#64748b"),
+        mode="lines",
+        name="Evaluated Arrival Rate",
+        line=dict(color="#64748b", width=1.6),
         customdata=eval_df["upper_tail_probability"],
         hovertemplate="<b>Interval:</b> %{x}<br><b>Count:</b> %{y} " + analysis.measurement_unit + "<br><b>P(X ≥ k):</b> %{customdata:.4e}<br><b>Segment:</b> Evaluated<extra></extra>"
     ))
 
     # 3. Categorized Flagged Bursts by Analyst Marker States
     if not flagged_df.empty:
-        # Build review attributes for each flagged interval
         flagged_copy = flagged_df.copy()
         flagged_copy["assessment"] = [
             reviews_map[int(i)].assessment if int(i) in reviews_map else AnalystAssessment.UNREVIEWED.value
@@ -861,13 +872,17 @@ def render_analyzer_page():
             reviews_map[int(i)].is_demo if int(i) in reviews_map else False
             for i in flagged_copy["interval"]
         ]
+        flagged_copy["group_name"] = [
+            reviews_map[int(i)].group_name if int(i) in reviews_map and reviews_map[int(i)].group_name else "Ungrouped"
+            for i in flagged_copy["interval"]
+        ]
 
         # Iterate through the 4 distinct marker categories
         for state_key, marker_cfg in ASSESSMENT_MARKERS.items():
             state_pts = flagged_copy[flagged_copy["assessment"] == state_key]
             if not state_pts.empty:
                 custom_hover = [
-                    f"Count: {row['packet_count']}<br>P(X ≥ k): {row['upper_tail_probability']:.2e}<br>Cause: {row['likely_cause']}{' (Demo)' if row['is_demo'] else ''}"
+                    f"Count: {row['packet_count']}<br>P(X ≥ k): {row['upper_tail_probability']:.2e}<br>Cause: {row['likely_cause']}<br>Group: {row['group_name']}{' (Demo)' if row['is_demo'] else ''}"
                     for _, row in state_pts.iterrows()
                 ]
                 fig_main.add_trace(go.Scatter(
@@ -885,7 +900,7 @@ def render_analyzer_page():
                     hovertemplate=f"<b>{marker_cfg['name']}</b><br><b>Interval:</b> %{{x}}<br>%{{customdata}}<extra></extra>"
                 ))
 
-    # 4. Simulation/Ground-truth attack labels (when available)
+    # 4. Simulation/Ground-truth attack labels (when available, distinctly rendered)
     if analysis.has_labels and "has_attack_label" in eval_df.columns:
         attack_pts = eval_df[eval_df["has_attack_label"]]
         if not attack_pts.empty:
@@ -900,7 +915,7 @@ def render_analyzer_page():
                     color="#f59e0b",
                     size=9,
                     symbol="diamond-open",
-                    line=dict(width=2.0, color="#d97706")
+                    line=dict(width=1.8, color="#d97706")
                 ),
                 customdata=attack_labels,
                 hovertemplate=f"<b>⚠️ {marker_name}</b><br><b>Interval:</b> %{{x}}<br><b>Count:</b> %{{y}}<br><b>Label:</b> %{{customdata}}<extra></extra>"
@@ -957,10 +972,14 @@ def render_analyzer_page():
     max_count = max(analysis.full_data["packet_count"].max(), int(analysis.lambda_hat * 1.5))
     y_limit = max_count * 1.15
 
+    # Layout with decoupled title and horizontal legend bar
     fig_main.update_layout(
         title=dict(
-            text=f"<b>Network Traffic Arrival Time Series:</b> Baseline Calibration & Analyst-Triage Markers",
-            font=dict(size=14.5, color="#f8fafc")
+            text="<b>Network Traffic Arrival Time Series:</b> Baseline Calibration & Multi-State Classification",
+            font=dict(size=14.5, color="#f8fafc"),
+            x=0.01,
+            y=0.98,
+            xanchor="left"
         ),
         paper_bgcolor="#131826",
         plot_bgcolor="#0e131f",
@@ -981,28 +1000,435 @@ def render_analyzer_page():
         legend=dict(
             orientation="h",
             yanchor="bottom",
-            y=1.03,
+            y=1.04,
             xanchor="right",
-            x=1,
-            bgcolor="rgba(15, 23, 42, 0.8)",
-            bordercolor="rgba(255, 255, 255, 0.08)",
+            x=1.0,
+            bgcolor="rgba(15, 23, 42, 0.85)",
+            bordercolor="rgba(255, 255, 255, 0.12)",
             borderwidth=1,
             font=dict(size=10.5)
         ),
-        margin=dict(l=20, r=20, t=75, b=35),
-        height=500,
+        margin=dict(l=20, r=20, t=85, b=35),
+        height=520,
         hovermode="closest"
     )
 
     st.plotly_chart(fig_main, width="stretch")
 
     # -------------------------------------------------------------------------
-    # WORKFLOW STEP 3: FULL-WIDTH EVALUATION RESULTS EXPLORER TABLE
+    # WORKFLOW STEP 3: FOUR ANALYST CATEGORY VIEWS CONSOLE (PHASE 1)
     # -------------------------------------------------------------------------
-    st.subheader("📋 Evaluation Results Explorer")
-    st.caption("Every evaluated interval with baseline comparisons, p-values, detector status, and analyst classification states.")
+    st.divider()
+    st.subheader("🛡️ Analyst Investigation Console & Category Views")
+    st.caption("Inspect and triage detected bursts across four dedicated review categories with full interval tables, group assignments, and metadata.")
 
-    # Table filter controls
+    cat_options = [
+        "UNREVIEWED",
+        "SAFE / LIKELY BENIGN",
+        "SUSPECTED ATTACK",
+        "CONFIRMED ATTACK"
+    ]
+
+    selected_category_tab = st.radio(
+        "Select Analyst Category View",
+        options=cat_options,
+        format_func=lambda x: {
+            "UNREVIEWED": f"🚨 UNREVIEWED ({count_unreviewed:,})",
+            "SAFE / LIKELY BENIGN": f"🛡️ SAFE / LIKELY BENIGN ({count_benign:,})",
+            "SUSPECTED ATTACK": f"⚠️ SUSPECTED ATTACK ({count_suspected:,})",
+            "CONFIRMED ATTACK": f"🛑 CONFIRMED ATTACK ({count_confirmed:,})"
+        }[x],
+        horizontal=True,
+        key="analyst_category_view_radio"
+    )
+
+    # Filter bursts strictly by selected category
+    category_target_assessment = {
+        "UNREVIEWED": AnalystAssessment.UNREVIEWED.value,
+        "SAFE / LIKELY BENIGN": AnalystAssessment.LIKELY_BENIGN.value,
+        "SUSPECTED ATTACK": AnalystAssessment.SUSPECTED_ATTACK.value,
+        "CONFIRMED ATTACK": AnalystAssessment.CONFIRMED_ATTACK.value
+    }[selected_category_tab]
+
+    cat_burst_rows = []
+    for _, row in flagged_df.iterrows():
+        i_num = int(row["interval"])
+        cnt = int(row["packet_count"])
+        p_val = float(row["upper_tail_probability"])
+        rev = reviews_map.get(i_num)
+
+        a_assessment = rev.assessment if rev else AnalystAssessment.UNREVIEWED.value
+        a_cause = rev.likely_cause if rev else "Pending Review"
+        a_group = rev.group_name if rev and rev.group_name else "Ungrouped"
+        is_d = rev.is_demo if rev else False
+
+        if a_assessment == category_target_assessment:
+            diff = cnt - analysis.lambda_hat
+            ratio = (cnt / analysis.lambda_hat) if analysis.lambda_hat > 0 else 1.0
+
+            r_dict = {
+                "Interval": i_num,
+                "Count (k)": cnt,
+                "Unit": analysis.measurement_unit,
+                "Baseline (λ̂)": round(analysis.lambda_hat, 2),
+                "Abs Dev": f"{diff:+.1f}",
+                "Ratio": f"{ratio:.2f}×",
+                "Upper-Tail P": f"{p_val:.2e}" if p_val < 0.0001 else f"{p_val:.4f}",
+                "Threshold (k_crit)": analysis.k_crit,
+                "Analyst Assessment": f"{a_assessment}{' (Demo)' if is_d else ''}",
+                "Likely Cause": a_cause,
+                "Group Assignment": a_group
+            }
+            if "timestamp" in row:
+                r_dict["Timestamp"] = str(row["timestamp"])
+            if "attack_type" in row and pd.notna(row["attack_type"]):
+                r_dict["Ground-Truth"] = str(row["attack_type"])
+            elif "scenario_label" in row and pd.notna(row["scenario_label"]):
+                r_dict["Ground-Truth"] = str(row["scenario_label"])
+
+            cat_burst_rows.append(r_dict)
+
+    df_cat_bursts = pd.DataFrame(cat_burst_rows)
+
+    if df_cat_bursts.empty:
+        st.info(f"No detected bursts currently match category '{selected_category_tab}'.")
+    else:
+        st.dataframe(
+            df_cat_bursts,
+            width="stretch",
+            hide_index=True,
+            height=260
+        )
+        st.caption(f"Showing all {len(df_cat_bursts):,} burst intervals in category '{selected_category_tab}'.")
+
+    # -------------------------------------------------------------------------
+    # WORKFLOW STEP 4: NAMED INVESTIGATION GROUPS & ANALYTICS (PHASES 2 & 3)
+    # -------------------------------------------------------------------------
+    st.divider()
+    st.subheader("📁 Named Investigation Groups & Multi-Burst Analytics")
+    st.caption("Organize nonconsecutive burst intervals into named investigations, evaluate aggregate arrival statistics, and generate group-level reports.")
+
+    # Refresh current groups
+    existing_groups = list(groups_map.values())
+    group_options = ["+ Create New Investigation Group"] + [f"{g.name} [{g.group_id}]" for g in existing_groups]
+
+    # Resolve active selected group
+    default_grp_idx = 0
+    if "selected_investigation_group_id" in st.session_state:
+        for idx, g in enumerate(existing_groups):
+            if g.group_id == st.session_state["selected_investigation_group_id"]:
+                default_grp_idx = idx + 1
+                break
+
+    sel_group_label = st.selectbox(
+        "Select Investigation Group to Manage or Inspect",
+        options=group_options,
+        index=default_grp_idx if default_grp_idx < len(group_options) else 0,
+        key="investigation_group_selector"
+    )
+
+    active_group: Optional[InvestigationGroup] = None
+    if sel_group_label != "+ Create New Investigation Group":
+        selected_gid = sel_group_label.split("[")[-1].replace("]", "").strip()
+        active_group = groups_map.get(selected_gid)
+        if active_group:
+            st.session_state["selected_investigation_group_id"] = active_group.group_id
+
+    # Group Form Container
+    with st.expander(f"⚙️ Configure Investigation Group: {active_group.name if active_group else 'New Group'}", expanded=(active_group is not None)):
+        with st.form(key=f"form_manage_group_{active_group.group_id if active_group else 'new'}"):
+            g_col1, g_col2 = st.columns(2, gap="medium")
+
+            with g_col1:
+                suggested_names = [
+                    "Scheduled Backup Surge",
+                    "Legitimate Traffic Spike",
+                    "Possible DDoS Investigation",
+                    "Network Scanning Investigation",
+                    "Unexplained Traffic Anomaly"
+                ]
+                default_name = active_group.name if active_group else suggested_names[0]
+                inp_group_name = st.text_input("Investigation Group Name (Required)", value=default_name)
+
+                # Cause dropdown (9 required options)
+                cause_choices = [c.value for c in LikelyCause]
+                def_cause = active_group.likely_cause if active_group else LikelyCause.SCHEDULED_BACKUP.value
+                inp_cause = st.selectbox(
+                    "Likely Cause of Burst (Required)",
+                    options=cause_choices,
+                    index=cause_choices.index(def_cause) if def_cause in cause_choices else 0,
+                    help="Underlying operational or threat hypothesis for this group of arrivals."
+                )
+
+                inp_desc = st.text_area(
+                    "Investigation Description",
+                    value=active_group.description if active_group else "",
+                    placeholder="Describe scope, targeted endpoints, and operational background...",
+                    height=80
+                )
+
+            with g_col2:
+                # Assessment dropdown (4 required options)
+                assess_choices = [a.value for a in AnalystAssessment]
+                def_assess = active_group.assessment if active_group else AnalystAssessment.UNREVIEWED.value
+                inp_assessment = st.selectbox(
+                    "Analyst Assessment (Required)",
+                    options=assess_choices,
+                    index=assess_choices.index(def_assess) if def_assess in assess_choices else 0,
+                    help="Formal security triage decision. Decoupled from likely cause."
+                )
+
+                conf_levels = [0.3, 0.6, 0.8, 0.95]
+                def_conf = active_group.confidence if active_group else 0.8
+                inp_conf = st.select_slider(
+                    "Confidence Level",
+                    options=conf_levels,
+                    value=def_conf if def_conf in conf_levels else 0.8,
+                    format_func=lambda x: f"{int(x*100)}% ({'High' if x>=0.8 else ('Medium' if x>=0.5 else 'Low')})"
+                )
+
+                inp_evidence = st.text_input(
+                    "Supporting Evidence Reference / Log Traces",
+                    value=active_group.supporting_evidence if active_group else "",
+                    placeholder="e.g. Host-Auth-Trace #1029, NetFlow-Sample-08"
+                )
+
+                inp_notes = st.text_area(
+                    "Analyst Notes & Context",
+                    value=active_group.notes if active_group else "",
+                    placeholder="Corroborating investigative details...",
+                    height=80
+                )
+
+            # Member interval selection (Supports nonconsecutive intervals)
+            st.markdown("##### 🎯 Member Burst Intervals Selection")
+            current_members = active_group.member_intervals if active_group else []
+            unrev_intervals = [i for i in flagged_intervals if i not in reviews_map or reviews_map[i].assessment == AnalystAssessment.UNREVIEWED.value]
+
+            bulk_col1, bulk_col2 = st.columns([2.5, 1.5])
+            with bulk_col1:
+                chk_bulk_all = st.checkbox(
+                    f"Select all currently unreviewed bursts ({len(unrev_intervals)} intervals)",
+                    value=False,
+                    help="Pre-fills member intervals with all unreviewed bursts in this dataset."
+                )
+            with bulk_col2:
+                confirm_bulk = st.checkbox(
+                    "⚠️ Confirm bulk review classification",
+                    value=False,
+                    help="Explicit confirmation required before applying bulk classification across unreviewed bursts."
+                )
+
+            if chk_bulk_all and confirm_bulk and unrev_intervals:
+                selectable_defaults = sorted(list(set(current_members + unrev_intervals)))
+            else:
+                selectable_defaults = [i for i in current_members if i in flagged_intervals]
+
+            inp_members = st.multiselect(
+                "Assign Nonconsecutive Member Intervals (IDs)",
+                options=flagged_intervals,
+                default=selectable_defaults,
+                format_func=lambda i: f"Interval #{i:,} (Count: {eval_df.loc[eval_df['interval']==i, 'packet_count'].values[0]:,} {analysis.measurement_unit})"
+            )
+
+            # Actions
+            btn_col1, btn_col2, _ = st.columns([2.0, 1.5, 3.5])
+            with btn_col1:
+                btn_save_group = st.form_submit_button("💾 Save / Update Investigation Group", type="primary")
+            with btn_col2:
+                btn_delete_group = st.form_submit_button("🗑️ Delete / Ungroup")
+
+            if btn_save_group:
+                if not inp_group_name.strip():
+                    st.error("❌ Investigation group name cannot be empty.")
+                elif not inp_members:
+                    st.error("❌ Please select at least one member burst interval for this group.")
+                else:
+                    gid = active_group.group_id if active_group else f"grp_{dataset_key}_{int(datetime.now(timezone.utc).timestamp())}"
+                    new_group = InvestigationGroup(
+                        group_id=gid,
+                        dataset_key=dataset_key,
+                        name=inp_group_name.strip(),
+                        likely_cause=inp_cause,
+                        assessment=inp_assessment,
+                        description=inp_desc.strip(),
+                        notes=inp_notes.strip(),
+                        supporting_evidence=inp_evidence.strip(),
+                        confidence=inp_conf,
+                        member_intervals=inp_members,
+                        is_demo=False
+                    )
+                    save_investigation_group(
+                        st.session_state, new_group, eval_df=eval_df,
+                        lambda_hat=analysis.lambda_hat, alpha=analysis.alpha,
+                        k_crit=analysis.k_crit, unit=analysis.measurement_unit
+                    )
+                    st.session_state["selected_investigation_group_id"] = gid
+                    st.success(f"✅ Investigation group '{new_group.name}' saved with {len(inp_members)} member intervals. Member reviews updated.")
+                    st.rerun()
+
+            if btn_delete_group and active_group:
+                delete_investigation_group(st.session_state, dataset_key, active_group.group_id)
+                st.session_state.pop("selected_investigation_group_id", None)
+                st.info(f"Group '{active_group.name}' removed and member intervals unbound.")
+                st.rerun()
+
+    # If an investigation group is selected, render comprehensive group analytics & reports
+    if active_group and active_group.member_intervals:
+        grp_analytics = calculate_group_analytics(
+            active_group, eval_df, analysis.lambda_hat, analysis.alpha, analysis.measurement_unit
+        )
+
+        st.markdown(f"#### 📊 Investigation Summary: {active_group.name}")
+        st.caption(f"Status: **{active_group.assessment}** &nbsp;|&nbsp; Cause: **{active_group.likely_cause}** &nbsp;|&nbsp; ID: `{active_group.group_id}`")
+
+        # Group KPI Metrics Row
+        g_kpi1, g_kpi2, g_kpi3, g_kpi4, g_kpi5 = st.columns(5)
+        with g_kpi1:
+            st.metric("Member Bursts", f"{grp_analytics['num_members']:,} int")
+        with g_kpi2:
+            st.metric("Interval Span", f"#{grp_analytics['earliest_interval']} – #{grp_analytics['latest_interval']}")
+        with g_kpi3:
+            st.metric("Count Range", f"{grp_analytics['min_count']:,} – {grp_analytics['max_count']:,}")
+        with g_kpi4:
+            st.metric("Mean Deviation", f"{grp_analytics['mean_deviation']:+.1f}", f"{grp_analytics['relative_ratio']:.2f}× λ̂")
+        with g_kpi5:
+            st.metric("P < α Improbability", f"{grp_analytics['prop_below_alpha']:.0%}", f"Min P: {grp_analytics['min_p_value']:.1e}")
+
+        # Methodological Span Note
+        st.info(f"ℹ️ **Span Telemetry Notice:** {grp_analytics['span_note']}")
+
+        # Member Intervals Detail Table
+        m_rows = []
+        for _, m_row in grp_analytics["member_df"].iterrows():
+            i_val = int(m_row["interval"])
+            cnt = int(m_row["packet_count"])
+            p_val = float(m_row["upper_tail_probability"])
+            diff = cnt - analysis.lambda_hat
+            ratio = (cnt / analysis.lambda_hat) if analysis.lambda_hat > 0 else 1.0
+            gt = str(m_row.get("attack_type", m_row.get("scenario_label", "Unlabeled")))
+            m_rows.append({
+                "Interval": i_val,
+                "Count (k)": cnt,
+                "Abs Dev": f"{diff:+.1f}",
+                "Ratio": f"{ratio:.2f}×",
+                "Upper-Tail P": f"{p_val:.2e}",
+                "Detector Flag": "🚨 Outlier" if m_row.get("is_burst", True) else "Normal",
+                "Ground-Truth Label": gt
+            })
+        st.dataframe(pd.DataFrame(m_rows), width="stretch", hide_index=True, height=200)
+
+        # -------------------------------------------------------------------------
+        # WORKFLOW STEP 5: GROUP INVESTIGATION REPORT & EXPORT (PHASE 4)
+        # -------------------------------------------------------------------------
+        st.markdown("#### 📑 Group Investigation Report")
+        grp_report_md = generate_group_investigation_report_markdown(
+            active_group, grp_analytics, source_label, "BurstPulse Synthetic/Dataset Engine", analysis.measurement_unit
+        )
+
+        with st.expander(f"👁️ Preview Formal Report: {active_group.name}", expanded=False):
+            st.markdown(grp_report_md)
+
+        rep_btn_c1, rep_btn_c2 = st.columns(2)
+        with rep_btn_c1:
+            st.download_button(
+                label=f"⬇️ Download Group Report (.md)",
+                data=grp_report_md.encode("utf-8"),
+                file_name=f"investigation_report_{active_group.group_id}.md",
+                mime="text/markdown",
+                key="btn_download_group_report_md"
+            )
+        with rep_btn_c2:
+            export_grp_df = grp_analytics["member_df"].copy()
+            st.download_button(
+                label="⬇️ Export Member Telemetry (CSV)",
+                data=export_grp_df.to_csv(index=False).encode("utf-8"),
+                file_name=f"{active_group.group_id}_member_telemetry.csv",
+                mime="text/csv",
+                key="btn_download_group_members_csv"
+            )
+
+    # -------------------------------------------------------------------------
+    # WORKFLOW STEP 5B: SINGLE BURST & FULL SUMMARY REPORTS
+    # -------------------------------------------------------------------------
+    st.divider()
+    st.subheader("🔍 Single Burst Inspection & Global Reports")
+    st.caption("Inspect individual outlier intervals, fine-tune individual reviews, or generate a comprehensive triage summary report.")
+
+    selectable_intervals = flagged_intervals if flagged_intervals else eval_df["interval"].tolist()
+    if selectable_intervals:
+        default_target = selectable_intervals[0]
+        if "selected_investigation_interval" not in st.session_state or st.session_state["selected_investigation_interval"] not in selectable_intervals:
+            if not flagged_df.empty:
+                default_target = int(flagged_df.loc[flagged_df["packet_count"].idxmax(), "interval"])
+            st.session_state["selected_investigation_interval"] = default_target
+
+        target_idx = st.selectbox(
+            "Select Discrete Interval for Single-Burst Telemetry & Reporting",
+            options=selectable_intervals,
+            index=selectable_intervals.index(st.session_state["selected_investigation_interval"]) if st.session_state["selected_investigation_interval"] in selectable_intervals else 0,
+            format_func=lambda i: f"Interval #{i:,} — Count: {eval_df.loc[eval_df['interval']==i, 'packet_count'].values[0]:,} {analysis.measurement_unit} [{reviews_map[i].assessment if i in reviews_map else 'Unreviewed'}]",
+            key="single_interval_report_target_selector"
+        )
+        st.session_state["selected_investigation_interval"] = target_idx
+
+        t_row = eval_df[eval_df["interval"] == target_idx].iloc[0]
+        t_cnt = int(t_row["packet_count"])
+        t_pval = float(t_row["upper_tail_probability"])
+        t_gt = str(t_row.get("attack_type", t_row.get("scenario_label", ""))) or None
+
+        act_rev = reviews_map.get(target_idx) or AnalystReview(
+            dataset_key=dataset_key,
+            interval=target_idx,
+            observed_count=t_cnt,
+            measurement_unit=analysis.measurement_unit,
+            lambda_hat=analysis.lambda_hat,
+            p_value=t_pval,
+            alpha=analysis.alpha,
+            k_crit=analysis.k_crit,
+            likely_cause=LikelyCause.INSUFFICIENT_EVIDENCE.value,
+            assessment=AnalystAssessment.UNREVIEWED.value,
+            notes="",
+            is_demo=False,
+            ground_truth_label=t_gt
+        )
+
+        single_rep_md = generate_single_burst_report_markdown(act_rev, source_label)
+        all_dataset_reviews = list(reviews_map.values())
+        summary_rep_md = generate_summary_investigation_report_markdown(all_dataset_reviews, source_label, analysis)
+
+        r_c1, r_c2 = st.columns(2, gap="medium")
+        with r_c1:
+            st.markdown(f"**Single Burst Report: Interval #{target_idx:,}**")
+            with st.expander("👁️ Preview Single Burst Report", expanded=False):
+                st.markdown(single_rep_md)
+            st.download_button(
+                label=f"⬇️ Download Interval #{target_idx} Report (.md)",
+                data=single_rep_md.encode("utf-8"),
+                file_name=f"investigation_report_interval_{target_idx}.md",
+                mime="text/markdown",
+                key="btn_download_single_report_md"
+            )
+
+        with r_c2:
+            st.markdown(f"**Global Triage Summary ({len(all_dataset_reviews)} Reviewed)**")
+            with st.expander("👁️ Preview Global Summary Report", expanded=False):
+                st.markdown(summary_rep_md)
+            st.download_button(
+                label="⬇️ Download Full Summary Report (.md)",
+                data=summary_rep_md.encode("utf-8"),
+                file_name=f"{dataset_key}_investigation_summary.md",
+                mime="text/markdown",
+                key="btn_download_summary_report_md"
+            )
+
+    # -------------------------------------------------------------------------
+    # WORKFLOW STEP 5C: FULL-WIDTH EVALUATION RESULTS EXPLORER TABLE
+    # -------------------------------------------------------------------------
+    st.divider()
+    st.subheader("📋 Evaluation Results Explorer")
+    st.caption("Comprehensive log of every evaluated interval with baseline metrics, p-values, detector status, and analyst classification states.")
+
     tbl_filter = st.radio(
         "Filter Observations by Status",
         options=[
@@ -1017,7 +1443,6 @@ def render_analyzer_page():
         key="main_evaluation_table_filter"
     )
 
-    # Build comprehensive explorer dataframe
     explorer_rows = []
     for _, row in eval_df.iterrows():
         i_num = int(row["interval"])
@@ -1030,14 +1455,17 @@ def render_analyzer_page():
             a_assessment = rev.assessment
             a_cause = rev.likely_cause
             is_d = rev.is_demo
+            a_grp = rev.group_name or "Ungrouped"
         elif is_b:
             a_assessment = AnalystAssessment.UNREVIEWED.value
             a_cause = "Pending Analyst Review"
             is_d = False
+            a_grp = "Ungrouped"
         else:
             a_assessment = "N/A (Within Threshold)"
             a_cause = "Within Expected Variation"
             is_d = False
+            a_grp = "Ungrouped"
 
         diff = cnt - analysis.lambda_hat
         ratio = (cnt / analysis.lambda_hat) if analysis.lambda_hat > 0 else 1.0
@@ -1053,7 +1481,8 @@ def render_analyzer_page():
             "Threshold α": analysis.alpha,
             "Detector Status": "🚨 Potential burst" if is_b else "✅ Within threshold",
             "Analyst Assessment": f"{a_assessment}{' (Demo)' if is_d else ''}",
-            "Likely Cause": a_cause
+            "Likely Cause": a_cause,
+            "Investigation Group": a_grp
         }
         if "timestamp" in row:
             r_dict["Timestamp"] = str(row["timestamp"])
@@ -1062,7 +1491,6 @@ def render_analyzer_page():
         elif "scenario_label" in row and pd.notna(row["scenario_label"]):
             r_dict["Ground-Truth"] = str(row["scenario_label"])
 
-        # Apply filtering
         include = False
         if tbl_filter == "All Evaluated Observations":
             include = True
@@ -1081,16 +1509,10 @@ def render_analyzer_page():
             explorer_rows.append(r_dict)
 
     df_explorer = pd.DataFrame(explorer_rows)
-
     if df_explorer.empty:
         st.info(f"No evaluated observations match filter '{tbl_filter}'.")
     else:
-        st.dataframe(
-            df_explorer,
-            width="stretch",
-            hide_index=True,
-            height=340
-        )
+        st.dataframe(df_explorer, width="stretch", hide_index=True, height=320)
 
     # Full CSV Export
     exp_c1, exp_c2 = st.columns([2.5, 1.5])
@@ -1107,248 +1529,6 @@ def render_analyzer_page():
             mime="text/csv",
             key="btn_download_evaluation_explorer_csv"
         )
-
-    # -------------------------------------------------------------------------
-    # WORKFLOW STEP 4: ANALYST INVESTIGATION & DROPDOWN CLASSIFICATION
-    # -------------------------------------------------------------------------
-    st.divider()
-    st.subheader("🔍 Analyst Investigation & Classification Workflow")
-    st.caption("Select any flagged interval to assign a likely cause, record an analyst assessment, enter technical notes, and generate reports.")
-
-    # Determine selectable intervals (prioritize flagged intervals, fallback to all)
-    flagged_intervals = eval_df[eval_df["is_burst"]]["interval"].tolist()
-    selectable_intervals = flagged_intervals if flagged_intervals else eval_df["interval"].tolist()
-
-    if not selectable_intervals:
-        st.info("No evaluated intervals available for investigation.")
-    else:
-        # Resolve currently selected interval in session state
-        default_target = selectable_intervals[0]
-        if "selected_investigation_interval" not in st.session_state or st.session_state["selected_investigation_interval"] not in selectable_intervals:
-            # Pick highest burst by count as default if available
-            if not flagged_df.empty:
-                default_target = int(flagged_df.loc[flagged_df["packet_count"].idxmax(), "interval"])
-            st.session_state["selected_investigation_interval"] = default_target
-
-        # Quick Jump Buttons
-        j_c1, j_c2, j_c3, j_c4 = st.columns(4)
-        peak_burst_idx = int(flagged_df.loc[flagged_df["packet_count"].idxmax(), "interval"]) if not flagged_df.empty else default_target
-        unrev_bursts = [i for i in flagged_intervals if i not in reviews_map or reviews_map[i].assessment == AnalystAssessment.UNREVIEWED.value]
-        first_unrev_idx = unrev_bursts[0] if unrev_bursts else default_target
-
-        with j_c1:
-            if st.button("🚨 Jump to Peak Burst", key="btn_jump_investigate_peak"):
-                st.session_state["selected_investigation_interval"] = peak_burst_idx
-                st.rerun()
-        with j_c2:
-            if st.button("⚡ Jump to First Unreviewed", key="btn_jump_investigate_unrev"):
-                st.session_state["selected_investigation_interval"] = first_unrev_idx
-                st.rerun()
-        with j_c3:
-            if st.button("🎯 Jump to First Burst", key="btn_jump_investigate_first"):
-                st.session_state["selected_investigation_interval"] = selectable_intervals[0]
-                st.rerun()
-        with j_c4:
-            if st.button("🔄 Jump to Last Burst", key="btn_jump_investigate_last"):
-                st.session_state["selected_investigation_interval"] = selectable_intervals[-1]
-                st.rerun()
-
-        # Interval dropdown selector
-        target_idx = st.selectbox(
-            "Select Interval for In-Depth Investigation",
-            options=selectable_intervals,
-            index=selectable_intervals.index(st.session_state["selected_investigation_interval"]) if st.session_state["selected_investigation_interval"] in selectable_intervals else 0,
-            format_func=lambda i: (
-                f"Interval #{i:,} — Count: {eval_df.loc[eval_df['interval']==i, 'packet_count'].values[0]:,} {analysis.measurement_unit} "
-                f"[{reviews_map[i].assessment if i in reviews_map else 'Unreviewed'}]"
-            ),
-            key="investigation_target_selector"
-        )
-        st.session_state["selected_investigation_interval"] = target_idx
-
-        # Retrieve row details for target
-        target_row = eval_df[eval_df["interval"] == target_idx].iloc[0]
-        target_count = int(target_row["packet_count"])
-        target_pval = float(target_row["upper_tail_probability"])
-        target_is_burst = bool(target_row["is_burst"])
-        target_gt = str(target_row.get("attack_type", target_row.get("scenario_label", ""))) or None
-
-        diff_cnt = target_count - analysis.lambda_hat
-        ratio_cnt = (target_count / analysis.lambda_hat) if analysis.lambda_hat > 0 else 1.0
-
-        existing_review = reviews_map.get(target_idx)
-
-        # Investigation Card Summary
-        st.markdown(f"""
-        <div class="provenance-card">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap;">
-                <span style="font-size: 1.15rem; font-weight: 700; color: #f8fafc;">
-                    Target Telemetry: Interval #{target_idx:,}
-                </span>
-                <span class="mode-badge" style="background: {'rgba(239, 68, 68, 0.25)' if target_is_burst else 'rgba(16, 185, 129, 0.2)'}; color: {'#fca5a5' if target_is_burst else '#6ee7b7'}; font-size: 0.85rem; padding: 4px 12px;">
-                    {'🚨 Improbable Surge (p < α)' if target_is_burst else '✅ Within Threshold'}
-                </span>
-            </div>
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-bottom: 14px;">
-                <div style="background: rgba(15, 23, 42, 0.6); padding: 10px 14px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.06);">
-                    <div style="font-size: 0.76rem; color: #94a3b8; text-transform: uppercase;">Measured Count (k)</div>
-                    <div style="font-size: 1.35rem; font-weight: 700; color: #f8fafc;">{target_count:,} <span style="font-size: 0.8rem; color: #94a3b8;">{analysis.measurement_unit}</span></div>
-                </div>
-                <div style="background: rgba(15, 23, 42, 0.6); padding: 10px 14px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.06);">
-                    <div style="font-size: 0.76rem; color: #94a3b8; text-transform: uppercase;">Baseline Rate (λ̂)</div>
-                    <div style="font-size: 1.35rem; font-weight: 700; color: #10b981;">{analysis.lambda_hat:.2f} <span style="font-size: 0.8rem; color: #94a3b8;">{analysis.measurement_unit}/int</span></div>
-                </div>
-                <div style="background: rgba(15, 23, 42, 0.6); padding: 10px 14px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.06);">
-                    <div style="font-size: 0.76rem; color: #94a3b8; text-transform: uppercase;">Deviation & Ratio</div>
-                    <div style="font-size: 1.35rem; font-weight: 700; color: {'#f87171' if diff_cnt > 0 else '#94a3b8'};">{diff_cnt:+.1f} <span style="font-size: 0.8rem; color: #94a3b8;">({ratio_cnt:.2f}×)</span></div>
-                </div>
-                <div style="background: rgba(15, 23, 42, 0.6); padding: 10px 14px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.06);">
-                    <div style="font-size: 0.76rem; color: #94a3b8; text-transform: uppercase;">Upper-Tail P(X ≥ k)</div>
-                    <div style="font-size: 1.35rem; font-weight: 700; color: {'#f87171' if target_pval < analysis.alpha else '#38bdf8'};">{target_pval:.3e}</div>
-                </div>
-                <div style="background: rgba(15, 23, 42, 0.6); padding: 10px 14px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.06);">
-                    <div style="font-size: 0.76rem; color: #94a3b8; text-transform: uppercase;">Dataset Ground-Truth</div>
-                    <div style="font-size: 1.15rem; font-weight: 600; color: #f59e0b;">{target_gt or 'Unlabeled'}</div>
-                </div>
-            </div>
-            <div style="font-size: 0.82rem; color: #94a3b8;">
-                🛡️ <b>Analytical Separation:</b> Statistical detection (P(X ≥ k) &lt; α) is mathematically independent from the analyst judgment and dataset benchmark labels below.
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-
-        # Analyst Classification Form
-        with st.form(f"form_analyst_review_{target_idx}"):
-            f_col1, f_col2 = st.columns(2, gap="medium")
-
-            # Dropdown 1: Likely Cause of Burst (9 required choices)
-            cause_options = [c.value for c in LikelyCause]
-            default_cause = existing_review.likely_cause if existing_review else LikelyCause.INSUFFICIENT_EVIDENCE.value
-            cause_idx = cause_options.index(default_cause) if default_cause in cause_options else 0
-
-            with f_col1:
-                sel_cause = st.selectbox(
-                    "Likely Cause of Burst (Required)",
-                    options=cause_options,
-                    index=cause_idx,
-                    help="Hypothesized root cause for arrival surge. Does not automatically dictate the assessment status."
-                )
-
-            # Dropdown 2: Analyst Assessment (4 required choices)
-            assess_options = [a.value for a in AnalystAssessment]
-            default_assess = existing_review.assessment if existing_review else AnalystAssessment.UNREVIEWED.value
-            assess_idx = assess_options.index(default_assess) if default_assess in assess_options else 0
-
-            with f_col2:
-                sel_assessment = st.selectbox(
-                    "Analyst Assessment (Required)",
-                    options=assess_options,
-                    index=assess_idx,
-                    help="Formal security triage determination. Kept distinct from statistical volume detection."
-                )
-
-            # Supplementary fields
-            n_col1, n_col2 = st.columns([1.5, 1.0])
-            with n_col1:
-                sel_notes = st.text_area(
-                    "Analyst Notes & Context",
-                    value=existing_review.notes if existing_review else "",
-                    placeholder="Enter investigative context, host details, or justification...",
-                    height=85
-                )
-            with n_col2:
-                sel_evidence = st.text_input(
-                    "Supporting Evidence Reference / Log Hash",
-                    value=existing_review.evidence if existing_review else "",
-                    placeholder="e.g. PCAP-9812, SIEM-Alert-4421"
-                )
-                conf_options = [0.3, 0.6, 0.9]
-                default_conf = existing_review.confidence if existing_review else 0.6
-                sel_conf = st.select_slider(
-                    "Assessment Confidence",
-                    options=conf_options,
-                    value=default_conf if default_conf in conf_options else 0.6,
-                    format_func=lambda x: f"{int(x*100)}% ({'High' if x>=0.8 else ('Medium' if x>=0.5 else 'Low')})"
-                )
-
-            btn_save = st.form_submit_button("💾 Save Analyst Classification", type="primary")
-
-            if btn_save:
-                new_rev = AnalystReview(
-                    dataset_key=dataset_key,
-                    interval=target_idx,
-                    observed_count=target_count,
-                    measurement_unit=analysis.measurement_unit,
-                    lambda_hat=analysis.lambda_hat,
-                    p_value=target_pval,
-                    alpha=analysis.alpha,
-                    k_crit=analysis.k_crit,
-                    likely_cause=sel_cause,
-                    assessment=sel_assessment,
-                    notes=sel_notes,
-                    evidence=sel_evidence,
-                    confidence=sel_conf,
-                    is_demo=False,
-                    ground_truth_label=target_gt
-                )
-                save_analyst_review(st.session_state, new_rev)
-                st.success(f"✅ Classification saved for Interval #{target_idx:,}: **{sel_assessment}** ({sel_cause}). Graph marker and table updated.")
-                st.rerun()
-
-        # -------------------------------------------------------------------------
-        # WORKFLOW STEP 5: AUTOMATIC INVESTIGATION REPORT GENERATION
-        # -------------------------------------------------------------------------
-        st.markdown("#### 📑 Automatic Investigation Reports")
-        rep_c1, rep_c2 = st.columns(2, gap="medium")
-
-        # Single burst report
-        active_review_for_report = reviews_map.get(target_idx) or AnalystReview(
-            dataset_key=dataset_key,
-            interval=target_idx,
-            observed_count=target_count,
-            measurement_unit=analysis.measurement_unit,
-            lambda_hat=analysis.lambda_hat,
-            p_value=target_pval,
-            alpha=analysis.alpha,
-            k_crit=analysis.k_crit,
-            likely_cause=LikelyCause.INSUFFICIENT_EVIDENCE.value,
-            assessment=AnalystAssessment.UNREVIEWED.value,
-            notes="",
-            is_demo=False,
-            ground_truth_label=target_gt
-        )
-
-        single_rep_md = generate_single_burst_report_markdown(active_review_for_report, source_label)
-
-        with rep_c1:
-            st.markdown(f"**Single Burst Report: Interval #{target_idx:,}**")
-            with st.expander("👁️ Preview Single Burst Investigation Report", expanded=False):
-                st.markdown(single_rep_md)
-
-            st.download_button(
-                label=f"⬇️ Download Interval #{target_idx} Report (.md)",
-                data=single_rep_md.encode("utf-8"),
-                file_name=f"investigation_report_interval_{target_idx}.md",
-                mime="text/markdown",
-                key="btn_download_single_report_md"
-            )
-
-        # Multi-interval summary report
-        all_dataset_reviews = list(reviews_map.values())
-        summary_rep_md = generate_summary_investigation_report_markdown(all_dataset_reviews, source_label, analysis)
-
-        with rep_c2:
-            st.markdown(f"**Multi-Interval Summary Report ({len(all_dataset_reviews)} Reviewed)**")
-            with st.expander("👁️ Preview Comprehensive Triage Summary", expanded=False):
-                st.markdown(summary_rep_md)
-
-            st.download_button(
-                label="⬇️ Download Full Summary Report (.md)",
-                data=summary_rep_md.encode("utf-8"),
-                file_name=f"{dataset_key}_investigation_summary.md",
-                mime="text/markdown",
-                key="btn_download_summary_report_md"
-            )
 
     # -------------------------------------------------------------------------
     # WORKFLOW STEP 6: DEEP STATISTICAL ANALYTICS & MATHEMATICAL FOUNDATIONS
