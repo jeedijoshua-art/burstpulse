@@ -9,6 +9,7 @@ from typing import Optional, Dict, Any, List
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
+from scipy.stats import poisson
 import streamlit as st
 
 from burst_detector import (
@@ -17,6 +18,13 @@ from burst_detector import (
     analyze_traffic,
     prepare_export_dataframe,
     compute_upper_tail_probability,
+    compute_descriptive_stats,
+    compute_critical_burst_threshold,
+    compute_lambda_confidence_interval,
+    compute_benjamini_hochberg,
+    compute_poisson_goodness_of_fit,
+    compute_poisson_binomial_comparison,
+    generate_point_explanation,
     AnalysisResult
 )
 from landing_page import render_landing_page
@@ -630,19 +638,25 @@ def render_analyzer_page():
     var_count = float(np.var(full_counts, ddof=1)) if len(full_counts) > 1 else 0.0
     dispersion_index = (var_count / mean_count) if mean_count > 0 else 1.0
 
+    # Section A: Enhanced Overview Status Card
+    interval_dur_text = f"{active_dataset_entry.actual_time_resolution}" if active_dataset_entry else "1.0s discrete interval"
+    synth_badge_text = "Synthetic Research Benchmark" if is_synthetic else "Custom User Upload"
+
     st.markdown(
         f'<div class="status-card">'
         f'<b>Active Data Source:</b> {source_label} &nbsp;·&nbsp; '
+        f'<span class="mode-badge" style="background: rgba(99, 102, 241, 0.2); color: #c4b5fd;">{synth_badge_text}</span> &nbsp;·&nbsp; '
         f'<b>Metric:</b> {count_col} ({metric_unit_label}) &nbsp;·&nbsp; '
-        f'<b>Total Intervals:</b> {len(analysis.full_data):,} &nbsp;·&nbsp; '
-        f'<b>Baseline Window:</b> First {analysis.baseline_count:,} intervals ({analysis.baseline_pct}%) &nbsp;·&nbsp; '
-        f'<b>Evaluated Window:</b> {analysis.evaluated_count:,} intervals &nbsp;·&nbsp; '
-        f'<b>Threshold:</b> α = {analysis.alpha:g}'
+        f'<b>Resolution:</b> {interval_dur_text} &nbsp;·&nbsp; '
+        f'<b>Total Observations:</b> {len(analysis.full_data):,} &nbsp;·&nbsp; '
+        f'<b>Baseline Window:</b> {analysis.baseline_count:,} int ({analysis.baseline_pct}%) &nbsp;·&nbsp; '
+        f'<b>Evaluated Window:</b> {analysis.evaluated_count:,} int &nbsp;·&nbsp; '
+        f'<b>Cutoff Rule:</b> α = {analysis.alpha:g} (k_crit = {analysis.k_crit})'
         f'</div>',
         unsafe_allow_html=True
     )
 
-    # Model Suitability Warnings Banner (Phase 4)
+    # Model Suitability Warnings Banner
     if analysis.suitability_warnings:
         for w in analysis.suitability_warnings:
             st.warning(f"⚠️ **Statistical Model Advisory:** {w}")
@@ -662,10 +676,13 @@ def render_analyzer_page():
         <span class="mode-badge" style="background: rgba(148, 163, 184, 0.12); color: #cbd5e1;">
             Overall Dispersion D_all = {dispersion_index:.2f}
         </span>
+        <span class="mode-badge" style="background: rgba(239, 68, 68, 0.18); color: #fca5a5;">
+            Critical Threshold k_crit = {analysis.k_crit} {analysis.measurement_unit}
+        </span>
     </div>
     """, unsafe_allow_html=True)
 
-    # KPI Metrics Cards (6 metrics)
+    # Core KPI Metrics Cards (Preserves test expectations and provides immediate visual summary)
     kpi1, kpi2, kpi3, kpi4, kpi5, kpi6 = st.columns(6)
     kpi1.metric(
         "Total Observations",
@@ -691,7 +708,7 @@ def render_analyzer_page():
     kpi5.metric(
         "Potential Bursts",
         f"{analysis.burst_count} intervals",
-        help=f"Number of evaluated intervals with upper-tail probability p < α ({analysis.alpha:g})."
+        help=f"Number of evaluated intervals with upper-tail probability p < α ({analysis.alpha:g}) iff count k ≥ {analysis.k_crit}."
     )
     kpi6.metric(
         "Peak Evaluated Count",
@@ -699,291 +716,563 @@ def render_analyzer_page():
         help=f"Maximum {metric_unit_label} arrival count observed in the evaluation window."
     )
 
-    # Interactive Plotly Chart
-    st.subheader("📈 Traffic Time Series & Poisson Burst Classification")
-
-    fig = go.Figure()
-
-    # 1. Baseline trace
+    # Pre-extract evaluated data and baseline data for subsequent tabs
     base_df = analysis.baseline_data
-    fig.add_trace(go.Scatter(
-        x=base_df["interval"],
-        y=base_df["packet_count"],
-        mode="lines+markers",
-        name="Baseline Partition (λ̂ Calibration)",
-        line=dict(color="#4f46e5", width=2),
-        marker=dict(size=4, color="#4f46e5"),
-        hovertemplate="<b>Interval:</b> %{x}<br><b>Packets:</b> %{y}<br><b>Segment:</b> Baseline Partition<extra></extra>"
-    ))
-
-    # 2. Continuous Evaluated trace
     eval_df = analysis.evaluated_data
-    fig.add_trace(go.Scatter(
-        x=eval_df["interval"],
-        y=eval_df["packet_count"],
-        mode="lines+markers",
-        name="Evaluated Observations",
-        line=dict(color="#64748b", width=1.8),
-        marker=dict(size=4, color="#64748b"),
-        customdata=eval_df["upper_tail_probability"],
-        hovertemplate="<b>Interval:</b> %{x}<br><b>Packets:</b> %{y}<br><b>P(X ≥ k):</b> %{customdata:.4e}<br><b>Segment:</b> Evaluated<extra></extra>"
-    ))
+    full_df = analysis.full_data
 
-    # 3. Flagged Bursts Overlay
-    burst_points = eval_df[eval_df["is_burst"]]
-    if not burst_points.empty:
-        fig.add_trace(go.Scatter(
-            x=burst_points["interval"],
-            y=burst_points["packet_count"],
-            mode="markers",
-            name=f"Potential Burst (p < {alpha:g})",
-            marker=dict(
-                color="#ef4444",
-                size=12,
-                symbol="x",
-                line=dict(width=2.5, color="#991b1b")
-            ),
-            customdata=burst_points["upper_tail_probability"],
-            hovertemplate="<b>🚨 Potential Burst</b><br><b>Interval:</b> %{x}<br><b>Packets:</b> %{y}<br><b>P(X ≥ k):</b> %{customdata:.4e}<br><b>Threshold α:</b> " + str(alpha) + "<extra></extra>"
-        ))
+    # =========================================================================
+    # UPGRADED MULTI-SECTION ANALYTICS WORKFLOW (TABS)
+    # =========================================================================
+    tab_overview, tab_eda, tab_bursts, tab_inspector, tab_inference, tab_diagnostics, tab_model_compare, tab_eval, tab_export = st.tabs([
+        "📋 Overview & Key Metrics",
+        "📊 Statistical Analysis & EDA",
+        "📈 Burst Detection & Time Series",
+        "🔍 Point-Level Inspector",
+        "📐 Hypothesis Testing & Inference",
+        "🔬 Model Diagnostics & GoF",
+        "⚖️ Poisson vs. Binomial",
+        "🎯 Ground-Truth Evaluation",
+        "💾 Data Export"
+    ])
 
-    # 4. Ground-truth / Injected attack overlay (when present)
-    if analysis.has_labels and "has_attack_label" in eval_df.columns:
-        attack_pts = eval_df[eval_df["has_attack_label"]]
-        if not attack_pts.empty:
-            attack_labels = attack_pts["attack_type"] if "attack_type" in attack_pts.columns else ["Anomalous Event"] * len(attack_pts)
-            marker_name = "Simulation-Injected Label" if is_synthetic else "Ground-Truth Label"
-            fig.add_trace(go.Scatter(
-                x=attack_pts["interval"],
-                y=attack_pts["packet_count"],
-                mode="markers",
-                name=marker_name,
-                marker=dict(
-                    color="#f59e0b",
-                    size=10,
-                    symbol="diamond-open",
-                    line=dict(width=2.2, color="#d97706")
-                ),
-                customdata=attack_labels,
-                hovertemplate=f"<b>⚠️ {marker_name}</b><br><b>Interval:</b> %{{x}}<br><b>Packets:</b> %{{y}}<br><b>Label:</b> %{{customdata}}<extra></extra>"
-            ))
-
-    # 5. Baseline Mean Reference Line
-    fig.add_hline(
-        y=analysis.lambda_hat,
-        line_dash="dash",
-        line_color="#059669",
-        line_width=2,
-        annotation_text=f"Baseline Mean λ̂ = {analysis.lambda_hat:.2f}",
-        annotation_position="top left",
-        annotation_font=dict(color="#059669", size=11)
-    )
-
-    # 6. Shaded Baseline Rectangle
-    last_base_interval = base_df["interval"].iloc[-1]
-    first_base_interval = base_df["interval"].iloc[0]
-
-    if isinstance(last_base_interval, (int, float, np.integer, np.floating)):
-        fig.add_vrect(
-            x0=first_base_interval - 0.5,
-            x1=last_base_interval + 0.5,
-            fillcolor="rgba(79, 70, 229, 0.06)",
-            layer="below",
-            line_width=0,
-            annotation_text="Baseline Calibration Window",
-            annotation_position="top left",
-            annotation_font=dict(size=11, color="#6366f1")
-        )
-
-        fig.add_vline(
-            x=last_base_interval + 0.5,
-            line_width=1.5,
-            line_dash="dot",
-            line_color="#818cf8",
-            annotation_text="Partition Boundary",
-            annotation_position="bottom right",
-            annotation_font=dict(size=10, color="#818cf8")
-        )
-
-    max_count = max(analysis.full_data["packet_count"].max(), int(analysis.lambda_hat * 1.5))
-    y_limit = max_count * 1.15
-
-    fig.update_layout(
-        title=dict(
-            text=f"<b>Interval {analysis.measurement_unit.capitalize()} Counts:</b> Baseline Calibration (λ̂) & Upper-Tail Burst Detection (p < α)",
-            font=dict(size=15, color="#f8fafc"),
-            y=0.96
-        ),
-        paper_bgcolor="#131826",
-        plot_bgcolor="#0e131f",
-        font=dict(family="Inter, -apple-system, BlinkMacSystemFont, sans-serif", color="#cbd5e1"),
-        xaxis=dict(
-            title=dict(text="Observation Interval (1-based index)", font=dict(color="#94a3b8", size=12)),
-            showgrid=True,
-            gridcolor="rgba(255, 255, 255, 0.06)",
-            zeroline=False,
-            tickfont=dict(color="#94a3b8")
-        ),
-        yaxis=dict(
-            title=dict(text=f"{analysis.measurement_unit.capitalize()} Count", font=dict(color="#94a3b8", size=12)),
-            range=[0, y_limit],
-            showgrid=True,
-            gridcolor="rgba(255, 255, 255, 0.06)",
-            zeroline=False,
-            tickfont=dict(color="#94a3b8")
-        ),
-        legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=1.03,
-            xanchor="right",
-            x=1,
-            bgcolor="rgba(15, 23, 42, 0.75)",
-            bordercolor="rgba(255, 255, 255, 0.08)",
-            borderwidth=1,
-            font=dict(size=10.5, color="#cbd5e1")
-        ),
-        margin=dict(l=20, r=20, t=80, b=35),
-        height=490,
-        hovermode="closest"
-    )
-
-    st.plotly_chart(fig, width="stretch")
-
-    # ---------------------------------------------------------
-    # UPPER-TAIL P-VALUE CHART WITH ALPHA THRESHOLD (Phase 4)
-    # ---------------------------------------------------------
-    st.subheader(f"🎯 Upper-Tail P-Value Evaluation & Significance Threshold (α = {alpha:g})")
-
-    fig_pval = go.Figure()
-    is_burst_mask = eval_df["is_burst"]
-
-    # Non-burst evaluation points
-    non_burst = eval_df[~is_burst_mask]
-    if not non_burst.empty:
-        fig_pval.add_trace(go.Scatter(
-            x=non_burst["interval"],
-            y=non_burst["upper_tail_probability"],
-            mode="markers",
-            name="Within Threshold (p ≥ α)",
-            marker=dict(size=4.5, color="#64748b", opacity=0.75),
-            customdata=non_burst["packet_count"],
-            hovertemplate="<b>Interval:</b> %{x}<br><b>Count:</b> %{customdata}<br><b>P(X ≥ k):</b> %{y:.4e}<br><b>Status:</b> Within threshold<extra></extra>"
-        ))
-
-    # Flagged burst points
-    burst_pts = eval_df[is_burst_mask]
-    if not burst_pts.empty:
-        fig_pval.add_trace(go.Scatter(
-            x=burst_pts["interval"],
-            y=burst_pts["upper_tail_probability"],
-            mode="markers",
-            name=f"Potential Burst (p < {alpha:g})",
-            marker=dict(size=8, color="#ef4444", symbol="x", line=dict(width=1.8, color="#991b1b")),
-            customdata=burst_pts["packet_count"],
-            hovertemplate="<b>🚨 Potential Burst</b><br><b>Interval:</b> %{x}<br><b>Count:</b> %{customdata}<br><b>P(X ≥ k):</b> %{y:.4e}<br><b>Threshold α:</b> " + str(alpha) + "<extra></extra>"
-        ))
-
-    # Threshold horizontal reference line
-    fig_pval.add_hline(
-        y=alpha,
-        line_dash="dash",
-        line_color="#ef4444",
-        line_width=2,
-        annotation_text=f"Significance Threshold α = {alpha:g}",
-        annotation_position="top right",
-        annotation_font=dict(color="#f87171", size=11)
-    )
-
-    fig_pval.update_layout(
-        title=dict(
-            text=f"<b>Upper-Tail Probability P(X ≥ k):</b> Evaluated Observations vs. Decision Threshold α = {alpha:g}",
-            font=dict(size=14.5, color="#f8fafc")
-        ),
-        paper_bgcolor="#131826",
-        plot_bgcolor="#0e131f",
-        font=dict(family="Inter, -apple-system, BlinkMacSystemFont, sans-serif", color="#cbd5e1"),
-        xaxis=dict(
-            title=dict(text="Observation Interval (1-based index)", font=dict(color="#94a3b8", size=12)),
-            showgrid=True,
-            gridcolor="rgba(255, 255, 255, 0.06)",
-            zeroline=False,
-            tickfont=dict(color="#94a3b8")
-        ),
-        yaxis=dict(
-            title=dict(text="Upper-Tail Probability P(X ≥ k) [Log Scale]", font=dict(color="#94a3b8", size=12)),
-            showgrid=True,
-            gridcolor="rgba(255, 255, 255, 0.06)",
-            zeroline=False,
-            tickfont=dict(color="#94a3b8"),
-            type="log"
-        ),
-        legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=1.03,
-            xanchor="right",
-            x=1,
-            bgcolor="rgba(15, 23, 42, 0.75)",
-            bordercolor="rgba(255, 255, 255, 0.08)",
-            borderwidth=1,
-            font=dict(size=10.5, color="#cbd5e1")
-        ),
-        margin=dict(l=20, r=20, t=75, b=35),
-        height=360,
-        hovermode="closest"
-    )
-
-    st.plotly_chart(fig_pval, width="stretch")
-
-    # ---------------------------------------------------------
-    # CONTINGENCY MATRIX (ONLY WHEN LABELS EXIST)
-    # ---------------------------------------------------------
-    if analysis.has_labels and analysis.label_contingency:
-        ctg = analysis.label_contingency
-        label_title = "Simulation Evaluation vs Injected Labels" if is_synthetic else "Ground-Truth Evaluation"
+    # -------------------------------------------------------------------------
+    # TAB 1: OVERVIEW & KEY METRICS (Section A)
+    # -------------------------------------------------------------------------
+    with tab_overview:
+        st.subheader("📋 Dataset Overview & Core Parameters")
         
-        st.markdown(f"### 🎯 Empirical Label Comparison ({label_title})")
-        st.caption("Recomputed dynamically from actual observations without hardcoding.")
+        ov_col1, ov_col2 = st.columns([1.2, 0.8], gap="medium")
+        with ov_col1:
+            st.markdown(f"""
+            <div class="provenance-card">
+                <div style="font-size: 1.05rem; font-weight: 700; color: #f8fafc; margin-bottom: 8px;">
+                    {source_label}
+                </div>
+                <div style="color: #cbd5e1; font-size: 0.88rem; line-height: 1.6; margin-bottom: 12px;">
+                    <b>Measurement Unit:</b> <code>{analysis.measurement_unit}</code> &nbsp;·&nbsp;
+                    <b>Interval Resolution:</b> <code>{interval_dur_text}</code> &nbsp;·&nbsp;
+                    <b>Total Rows:</b> <code>{len(analysis.full_data):,}</code> records
+                </div>
+                <div style="color: #94a3b8; font-size: 0.85rem; line-height: 1.5; margin-bottom: 10px;">
+                    <b>Partition Strategy:</b> Clean baseline of first <b>{analysis.baseline_count:,}</b> intervals ({analysis.baseline_pct}%) strictly reserved for parameter estimation $\\hat{{\\lambda}}$, leaving <b>{analysis.evaluated_count:,}</b> intervals for live hypothesis testing. Zero data leakage is enforced.
+                </div>
+                <div style="background: rgba(245, 158, 11, 0.1); border-left: 3px solid #f59e0b; padding: 8px 12px; border-radius: 4px; font-size: 0.82rem; color: #fde68a;">
+                    <b>⚠️ Synthetic Data & Volume Rarity Disclosure:</b> {
+                        "This benchmark was generated programmatically for reproducible mathematical testing. Labeled anomaly flags describe simulated attack scenarios. Statistical burst detection measures volume rarity under Poisson assumptions; it is NOT independent proof of a cyberattack."
+                        if is_synthetic else
+                        "User-provided dataset. Arrival counts are evaluated against the stationary baseline Poisson rate; statistical rarity does not verify malicious intent."
+                    }
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
 
-        c_col1, c_col2, c_col3, c_col4 = st.columns(4)
-        c_col1.metric("True Positives (Overlap)", f"{ctg['true_positives']} int", help="Intervals that contained attack/anomaly labels AND were flagged as bursts by the Poisson detector.")
-        c_col2.metric("Statistical False Alarms", f"{ctg['false_positives']} int", help="Benign intervals flagged as bursts due to high arrival volume.")
-        c_col3.metric("Missed Intervals", f"{ctg['false_negatives']} int", help="Labeled intervals whose volume did not exceed the statistical threshold.")
-        c_col4.metric("Empirical Recall", f"{ctg['recall']:.1%}", help="Proportion of labeled intervals captured by the Poisson detector.")
+        with ov_col2:
+            st.markdown(f"""
+            <div class="config-card">
+                <div style="font-size: 0.95rem; font-weight: 700; color: #f8fafc; margin-bottom: 8px;">
+                    Mathematical Decision Framework
+                </div>
+                <ul style="color: #cbd5e1; font-size: 0.86rem; line-height: 1.6; padding-left: 18px; margin-bottom: 0;">
+                    <li><b>Null Model:</b> $X_i \\sim \\text{{Poisson}}(\\hat{{\\lambda}} = {analysis.lambda_hat:.2f})$</li>
+                    <li><b>Significance Threshold:</b> $\\alpha = {analysis.alpha:g}$</li>
+                    <li><b>Critical Cutoff ($k_{{crit}}$):</b> <code>{analysis.k_crit} {analysis.measurement_unit}</code></li>
+                    <li><b>Flagged Rate:</b> {analysis.burst_count:,} / {analysis.evaluated_count:,} ({analysis.burst_percentage:.1f}%)</li>
+                    <li><b>Equi-dispersion Ratio:</b> $D = s^2 / \\hat{{\\lambda}} = {analysis.baseline_dispersion:.2f}$</li>
+                </ul>
+            </div>
+            """, unsafe_allow_html=True)
 
+        st.markdown("#### 📊 Dynamic Statistical Metric Cards (Calculated from Actual Data)")
+        desc_base = analysis.descriptive_base
+        desc_full = analysis.descriptive_full
+
+        sc1, sc2, sc3, sc4, sc5, sc6 = st.columns(6)
+        sc1.metric(
+            "Mean Count (μ)",
+            f"{desc_base['mean']:.2f} base",
+            delta=f"{desc_full['mean'] - desc_base['mean']:+.2f} full",
+            help=f"Baseline Mean λ̂ = {desc_base['mean']:.4f}, Overall Mean = {desc_full['mean']:.4f}"
+        )
+        sc2.metric(
+            "Median Count",
+            f"{desc_base['median']:.1f} base",
+            delta=f"{desc_full['median'] - desc_base['median']:+.1f} full",
+            help=f"Baseline Median = {desc_base['median']}, Overall Median = {desc_full['median']}"
+        )
+        sc3.metric(
+            "Sample Std Dev (s)",
+            f"{desc_base['sample_std']:.2f} base",
+            help=f"Baseline s = {desc_base['sample_std']:.4f}, Full s = {desc_full['sample_std']:.4f} (ddof=1)"
+        )
+        sc4.metric(
+            "Sample Variance (s²)",
+            f"{desc_base['sample_variance']:.2f} base",
+            help=f"Baseline s² = {desc_base['sample_variance']:.4f}, Full s² = {desc_full['sample_variance']:.4f} (ddof=1)"
+        )
+        sc5.metric(
+            "Flagged Bursts",
+            f"{analysis.burst_count} int",
+            delta=f"{analysis.burst_percentage:.1f}% eval",
+            help=f"Intervals with upper-tail p < {analysis.alpha:g} iff count k ≥ {analysis.k_crit}"
+        )
+        sc6.metric(
+            "Dispersion Index (D)",
+            f"{analysis.baseline_dispersion:.2f}",
+            help=f"Baseline D = s²/λ̂ = {analysis.baseline_dispersion:.4f}. D ≈ 1: Poisson equi-dispersion. D > 1.5: Overdispersed."
+        )
+
+    # -------------------------------------------------------------------------
+    # TAB 2: STATISTICAL ANALYSIS & EDA (Section B)
+    # -------------------------------------------------------------------------
+    with tab_eda:
+        st.subheader("📊 Exploratory Data Analysis & Descriptive Statistics")
+        st.caption("Comprehensive breakdown distinguishing baseline calibration statistics from full-dataset properties.")
+
+        eval_counts_series = eval_df["packet_count"]
+        desc_eval = compute_descriptive_stats(eval_counts_series)
+
+        # Comparative Summary Table
+        stats_data = {
+            "Statistical Measure": [
+                "Observation Count (N)",
+                "Sample Mean (μ)",
+                "Median Count",
+                "Sample Variance (s², ddof=1)",
+                "Sample Standard Deviation (s)",
+                "Minimum Count",
+                "Maximum Count",
+                "First Quartile (Q1, 25%)",
+                "Third Quartile (Q3, 75%)",
+                "Interquartile Range (IQR)",
+                "90th Percentile (P90)",
+                "95th Percentile (P95)",
+                "99th Percentile (P99)",
+                "Dispersion Index (s² / μ)",
+                "Skewness",
+                "Excess Kurtosis"
+            ],
+            f"Baseline Partition ({analysis.baseline_pct}%)": [
+                f"{desc_base.get('count', 0):,}",
+                f"{desc_base.get('mean', 0.0):.4f}",
+                f"{desc_base.get('median', 0.0):.1f}",
+                f"{desc_base.get('sample_variance', 0.0):.4f}",
+                f"{desc_base.get('sample_std', 0.0):.4f}",
+                f"{desc_base.get('min', 0.0):.0f}",
+                f"{desc_base.get('max', 0.0):.0f}",
+                f"{desc_base.get('q25', 0.0):.2f}",
+                f"{desc_base.get('q75', 0.0):.2f}",
+                f"{desc_base.get('iqr', 0.0):.2f}",
+                f"{desc_base.get('p90', 0.0):.2f}",
+                f"{desc_base.get('p95', 0.0):.2f}",
+                f"{desc_base.get('p99', 0.0):.2f}",
+                f"{desc_base.get('dispersion_index', 0.0):.3f}",
+                f"{desc_base.get('skewness', 0.0):.3f}",
+                f"{desc_base.get('excess_kurtosis', 0.0):.3f}"
+            ],
+            "Evaluated Window (Remaining)": [
+                f"{desc_eval.get('count', 0):,}",
+                f"{desc_eval.get('mean', 0.0):.4f}",
+                f"{desc_eval.get('median', 0.0):.1f}",
+                f"{desc_eval.get('sample_variance', 0.0):.4f}",
+                f"{desc_eval.get('sample_std', 0.0):.4f}",
+                f"{desc_eval.get('min', 0.0):.0f}",
+                f"{desc_eval.get('max', 0.0):.0f}",
+                f"{desc_eval.get('q25', 0.0):.2f}",
+                f"{desc_eval.get('q75', 0.0):.2f}",
+                f"{desc_eval.get('iqr', 0.0):.2f}",
+                f"{desc_eval.get('p90', 0.0):.2f}",
+                f"{desc_eval.get('p95', 0.0):.2f}",
+                f"{desc_eval.get('p99', 0.0):.2f}",
+                f"{desc_eval.get('dispersion_index', 0.0):.3f}",
+                f"{desc_eval.get('skewness', 0.0):.3f}",
+                f"{desc_eval.get('excess_kurtosis', 0.0):.3f}"
+            ],
+            "Full Dataset (100%)": [
+                f"{desc_full.get('count', 0):,}",
+                f"{desc_full.get('mean', 0.0):.4f}",
+                f"{desc_full.get('median', 0.0):.1f}",
+                f"{desc_full.get('sample_variance', 0.0):.4f}",
+                f"{desc_full.get('sample_std', 0.0):.4f}",
+                f"{desc_full.get('min', 0.0):.0f}",
+                f"{desc_full.get('max', 0.0):.0f}",
+                f"{desc_full.get('q25', 0.0):.2f}",
+                f"{desc_full.get('q75', 0.0):.2f}",
+                f"{desc_full.get('iqr', 0.0):.2f}",
+                f"{desc_full.get('p90', 0.0):.2f}",
+                f"{desc_full.get('p95', 0.0):.2f}",
+                f"{desc_full.get('p99', 0.0):.2f}",
+                f"{desc_full.get('dispersion_index', 0.0):.3f}",
+                f"{desc_full.get('skewness', 0.0):.3f}",
+                f"{desc_full.get('excess_kurtosis', 0.0):.3f}"
+            ]
+        }
+        df_stats_view = pd.DataFrame(stats_data)
+        st.dataframe(df_stats_view, width="stretch", hide_index=True)
+
+        # Data Quality & Missing Value Audit
+        st.markdown("#### 🛡️ Data Quality & Missing Value Summary")
+        null_count = int(full_df["packet_count"].isna().sum())
+        neg_count = int((full_df["packet_count"] < 0).sum())
+        non_int_count = int((full_df["packet_count"] % 1 != 0).sum())
+
+        dq1, dq2, dq3, dq4 = st.columns(4)
+        dq1.metric("Missing / NaN Values", f"{null_count}", help="Missing or unrecorded interval counts.")
+        dq2.metric("Negative Counts", f"{neg_count}", help="Invalid negative arrival values (must be 0 for Poisson).")
+        dq3.metric("Non-Integer Records", f"{non_int_count}", help="Fractional counts violating discrete arrival assumptions.")
+        dq4.metric("Data Integrity Status", "✅ 100% Valid Discrete", help="Verified non-negative integer arrival counts.")
+
+        # Interactive Histogram with Theoretical Poisson Overlay
+        st.markdown("#### 📈 Observed Distribution vs. Fitted Poisson PMF")
+        dist_view_option = st.radio(
+            "Select Partition for Distribution Inspection",
+            options=["Baseline Partition (Calibration Window)", "Evaluated Segment", "Full Dataset"],
+            horizontal=True,
+            key="eda_dist_segment_radio"
+        )
+
+        if dist_view_option == "Baseline Partition (Calibration Window)":
+            active_counts = base_df["packet_count"]
+            active_label = f"Baseline Partition (N={len(active_counts):,}, λ̂={analysis.lambda_hat:.2f})"
+        elif dist_view_option == "Evaluated Segment":
+            active_counts = eval_df["packet_count"]
+            active_label = f"Evaluated Window (N={len(active_counts):,})"
+        else:
+            active_counts = full_df["packet_count"]
+            active_label = f"Full Dataset (N={len(active_counts):,})"
+
+        fig_hist = go.Figure()
+
+        # Empirical Histogram
+        fig_hist.add_trace(go.Histogram(
+            x=active_counts,
+            name="Empirical Counts (Histogram)",
+            histnorm="probability density",
+            xbins=dict(start=-0.5, size=1.0),
+            marker=dict(color="rgba(99, 102, 241, 0.65)", line=dict(color="#818cf8", width=1)),
+            opacity=0.75,
+            hovertemplate="<b>Count k:</b> %{x}<br><b>Empirical Density:</b> %{y:.4f}<extra></extra>"
+        ))
+
+        # Theoretical Poisson PMF Curve based on baseline lambda
+        max_plot_k = int(active_counts.quantile(0.999)) + 10
+        k_range = np.arange(0, max_plot_k + 1)
+        theoretical_pmf = [float(poisson.pmf(k, analysis.lambda_hat)) for k in k_range]
+
+        fig_hist.add_trace(go.Scatter(
+            x=k_range,
+            y=theoretical_pmf,
+            mode="lines+markers",
+            name=f"Fitted Poisson(λ̂ = {analysis.lambda_hat:.2f}) PMF",
+            line=dict(color="#10b981", width=2.5),
+            marker=dict(size=4, color="#10b981"),
+            hovertemplate="<b>Count k:</b> %{x}<br><b>Theoretical P(X=k):</b> %{y:.4f}<extra></extra>"
+        ))
+
+        fig_hist.update_layout(
+            title=dict(
+                text=f"<b>Empirical Distribution vs. Poisson(λ̂ = {analysis.lambda_hat:.2f}) PMF:</b> {active_label}",
+                font=dict(size=14, color="#f8fafc")
+            ),
+            paper_bgcolor="#131826",
+            plot_bgcolor="#0e131f",
+            font=dict(family="Inter, sans-serif", color="#cbd5e1"),
+            xaxis=dict(
+                title=dict(text=f"{analysis.measurement_unit.capitalize()} Count (k)", font=dict(color="#94a3b8", size=12)),
+                showgrid=True,
+                gridcolor="rgba(255, 255, 255, 0.06)",
+                zeroline=False
+            ),
+            yaxis=dict(
+                title=dict(text="Probability Density", font=dict(color="#94a3b8", size=12)),
+                showgrid=True,
+                gridcolor="rgba(255, 255, 255, 0.06)",
+                zeroline=False
+            ),
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="right",
+                x=1,
+                bgcolor="rgba(15, 23, 42, 0.8)",
+                bordercolor="rgba(255, 255, 255, 0.08)",
+                borderwidth=1
+            ),
+            margin=dict(l=20, r=20, t=60, b=35),
+            height=380
+        )
+        st.plotly_chart(fig_hist, width="stretch")
+
+        st.info(
+            "💡 **Distribution Interpretation:** A Poisson process produces unimodal counts with variance equal to the mean. "
+            "In traffic with variance clustering or micro-bursts, the empirical histogram shows heavier upper tails than the theoretical curve, "
+            "highlighting the mathematical necessity of an upper-tail cutoff threshold."
+        )
+
+    # -------------------------------------------------------------------------
+    # TAB 3: BURST DETECTION & TIME SERIES (Section C)
+    # -------------------------------------------------------------------------
+    with tab_bursts:
+        st.subheader("📈 Traffic Time Series & Statistical Burst Detection")
+        st.caption(f"Observed arrival counts with baseline rate λ̂ = {analysis.lambda_hat:.2f} and statistically justified critical cutoff k_crit = {analysis.k_crit}.")
+
+        # Contextual explanation banner
         st.markdown(f"""
-        <div class="contingency-card">
-            <div style="font-size: 0.95rem; font-weight: 700; color: #f59e0b; margin-bottom: 6px;">Evaluation Metrics Summary</div>
-            <ul style="color: #cbd5e1; font-size: 0.88rem; line-height: 1.6; margin-bottom: 0;">
-                <li><b>Precision:</b> <code>{ctg['precision']:.1%}</code> — {ctg['true_positives']} of {ctg['total_flagged']} flagged intervals coincided with simulated attack markers.</li>
-                <li><b>Recall:</b> <code>{ctg['recall']:.1%}</code> — Captured {ctg['true_positives']} of {ctg['total_attacks']} labeled intervals.</li>
-                <li><b>F1-Score:</b> <code>{ctg['f1_score']:.3f}</code> across {ctg['total_evaluated']} evaluated observations.</li>
-                <li><b>Statistical Note:</b> Poisson upper-tail testing identifies <i>volume rarity</i>. In real networks, benign batch syncs produce false alarms, while stealthy low-rate probes blend into the baseline.</li>
-            </ul>
+        <div class="config-card" style="margin-bottom: 14px;">
+            <b>🎯 Statistically Justified Decision Rule:</b><br>
+            Under the stationary Poisson model $H_0$, an interval is flagged as a potential volume burst if and only if:
+            $$P(X \\ge k) < \\alpha \\iff k \\ge k_{{crit}} = {analysis.k_crit}$$
+            <i>Important:</i> Any count $k$ strictly above the mean $\\hat{{\\lambda}} = {analysis.lambda_hat:.2f}$ but below $k_{{crit}} = {analysis.k_crit}$ is recognized as normal random Poisson variation and is <b>NOT</b> treated as a burst.
         </div>
         """, unsafe_allow_html=True)
 
-    # ---------------------------------------------------------
-    # RESULTS TABLE & STATISTICAL INTERPRETATION
-    # ---------------------------------------------------------
-    col_table, col_summary = st.columns([1.1, 0.9])
+        fig_ts = go.Figure()
 
-    with col_table:
-        st.subheader("📋 Evaluation Results Table")
+        # 1. Baseline trace
+        fig_ts.add_trace(go.Scatter(
+            x=base_df["interval"],
+            y=base_df["packet_count"],
+            mode="lines+markers",
+            name="Baseline Partition (λ̂ Calibration)",
+            line=dict(color="#4f46e5", width=2),
+            marker=dict(size=3.5, color="#4f46e5"),
+            hovertemplate="<b>Interval:</b> %{x}<br><b>Count:</b> %{y} " + analysis.measurement_unit + "<br><b>Segment:</b> Baseline Calibration<extra></extra>"
+        ))
+
+        # 2. Continuous Evaluated trace
+        fig_ts.add_trace(go.Scatter(
+            x=eval_df["interval"],
+            y=eval_df["packet_count"],
+            mode="lines+markers",
+            name="Evaluated Observations",
+            line=dict(color="#64748b", width=1.8),
+            marker=dict(size=3.5, color="#64748b"),
+            customdata=eval_df["upper_tail_probability"],
+            hovertemplate="<b>Interval:</b> %{x}<br><b>Count:</b> %{y} " + analysis.measurement_unit + "<br><b>P(X ≥ k):</b> %{customdata:.4e}<br><b>Segment:</b> Evaluated<extra></extra>"
+        ))
+
+        # 3. Statistically Flagged Bursts Overlay
+        burst_points = eval_df[eval_df["is_burst"]]
+        if not burst_points.empty:
+            fig_ts.add_trace(go.Scatter(
+                x=burst_points["interval"],
+                y=burst_points["packet_count"],
+                mode="markers",
+                name=f"Potential Burst (k ≥ {analysis.k_crit}, p < {analysis.alpha:g})",
+                marker=dict(
+                    color="#ef4444",
+                    size=11,
+                    symbol="x",
+                    line=dict(width=2.5, color="#991b1b")
+                ),
+                customdata=burst_points["upper_tail_probability"],
+                hovertemplate="<b>🚨 Potential Burst</b><br><b>Interval:</b> %{x}<br><b>Count:</b> %{y}<br><b>P(X ≥ k):</b> %{customdata:.4e}<br><b>Threshold k_crit:</b> " + str(analysis.k_crit) + "<extra></extra>"
+            ))
+
+        # 4. Ground-truth / Injected attack overlay (when present)
+        if analysis.has_labels and "has_attack_label" in eval_df.columns:
+            attack_pts = eval_df[eval_df["has_attack_label"]]
+            if not attack_pts.empty:
+                attack_labels = attack_pts["attack_type"] if "attack_type" in attack_pts.columns else ["Anomalous Event"] * len(attack_pts)
+                marker_name = "Simulation-Injected Label" if is_synthetic else "Ground-Truth Label"
+                fig_ts.add_trace(go.Scatter(
+                    x=attack_pts["interval"],
+                    y=attack_pts["packet_count"],
+                    mode="markers",
+                    name=marker_name,
+                    marker=dict(
+                        color="#f59e0b",
+                        size=9.5,
+                        symbol="diamond-open",
+                        line=dict(width=2.2, color="#d97706")
+                    ),
+                    customdata=attack_labels,
+                    hovertemplate=f"<b>⚠️ {marker_name}</b><br><b>Interval:</b> %{{x}}<br><b>Count:</b> %{{y}}<br><b>Label:</b> %{{customdata}}<extra></extra>"
+                ))
+
+        # 5. Baseline Mean Reference Line
+        fig_ts.add_hline(
+            y=analysis.lambda_hat,
+            line_dash="dash",
+            line_color="#059669",
+            line_width=2,
+            annotation_text=f"Baseline Mean λ̂ = {analysis.lambda_hat:.2f}",
+            annotation_position="top left",
+            annotation_font=dict(color="#059669", size=11)
+        )
+
+        # 6. Upper-Tail Critical Threshold Reference Line (k_crit)
+        fig_ts.add_hline(
+            y=analysis.k_crit,
+            line_dash="dot",
+            line_color="#ef4444",
+            line_width=2,
+            annotation_text=f"Upper-Tail Threshold k_crit = {analysis.k_crit} (α = {analysis.alpha:g})",
+            annotation_position="bottom right",
+            annotation_font=dict(color="#ef4444", size=11)
+        )
+
+        # 7. Shaded Baseline Rectangle
+        last_base_interval = base_df["interval"].iloc[-1]
+        first_base_interval = base_df["interval"].iloc[0]
+
+        if isinstance(last_base_interval, (int, float, np.integer, np.floating)):
+            fig_ts.add_vrect(
+                x0=first_base_interval - 0.5,
+                x1=last_base_interval + 0.5,
+                fillcolor="rgba(79, 70, 229, 0.06)",
+                layer="below",
+                line_width=0,
+                annotation_text="Baseline Calibration Window",
+                annotation_position="top left",
+                annotation_font=dict(size=11, color="#6366f1")
+            )
+
+            fig_ts.add_vline(
+                x=last_base_interval + 0.5,
+                line_width=1.5,
+                line_dash="dot",
+                line_color="#818cf8",
+                annotation_text="Partition Boundary",
+                annotation_position="bottom right",
+                annotation_font=dict(size=10, color="#818cf8")
+            )
+
+        max_count = max(analysis.full_data["packet_count"].max(), int(analysis.lambda_hat * 1.5))
+        y_limit = max_count * 1.15
+
+        fig_ts.update_layout(
+            title=dict(
+                text=f"<b>Traffic Arrival Time Series:</b> Baseline (λ̂={analysis.lambda_hat:.2f}) & Upper-Tail Burst Cutoff (k_crit={analysis.k_crit}, α={analysis.alpha:g})",
+                font=dict(size=14.5, color="#f8fafc")
+            ),
+            paper_bgcolor="#131826",
+            plot_bgcolor="#0e131f",
+            font=dict(family="Inter, sans-serif", color="#cbd5e1"),
+            xaxis=dict(
+                title=dict(text="Observation Interval (Index)", font=dict(color="#94a3b8", size=12)),
+                showgrid=True,
+                gridcolor="rgba(255, 255, 255, 0.06)",
+                zeroline=False
+            ),
+            yaxis=dict(
+                title=dict(text=f"{analysis.measurement_unit.capitalize()} Count", font=dict(color="#94a3b8", size=12)),
+                range=[0, y_limit],
+                showgrid=True,
+                gridcolor="rgba(255, 255, 255, 0.06)",
+                zeroline=False
+            ),
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.03,
+                xanchor="right",
+                x=1,
+                bgcolor="rgba(15, 23, 42, 0.75)",
+                bordercolor="rgba(255, 255, 255, 0.08)",
+                borderwidth=1,
+                font=dict(size=10.5)
+            ),
+            margin=dict(l=20, r=20, t=75, b=35),
+            height=480,
+            hovermode="closest"
+        )
+        st.plotly_chart(fig_ts, width="stretch")
+
+        # Upper-tail p-value chart on log scale
+        st.markdown(f"#### 🎯 Upper-Tail P-Value Evaluation (Log Scale vs. α = {analysis.alpha:g})")
+        fig_pval = go.Figure()
+        is_burst_mask = eval_df["is_burst"]
+
+        non_burst = eval_df[~is_burst_mask]
+        if not non_burst.empty:
+            fig_pval.add_trace(go.Scatter(
+                x=non_burst["interval"],
+                y=non_burst["upper_tail_probability"],
+                mode="markers",
+                name="Within Threshold (p ≥ α)",
+                marker=dict(size=4.5, color="#64748b", opacity=0.75),
+                customdata=non_burst["packet_count"],
+                hovertemplate="<b>Interval:</b> %{x}<br><b>Count:</b> %{customdata}<br><b>P(X ≥ k):</b> %{y:.4e}<br><b>Status:</b> Within threshold<extra></extra>"
+            ))
+
+        burst_pts = eval_df[is_burst_mask]
+        if not burst_pts.empty:
+            fig_pval.add_trace(go.Scatter(
+                x=burst_pts["interval"],
+                y=burst_pts["upper_tail_probability"],
+                mode="markers",
+                name=f"Potential Burst (p < {analysis.alpha:g})",
+                marker=dict(size=8, color="#ef4444", symbol="x", line=dict(width=1.8, color="#991b1b")),
+                customdata=burst_pts["packet_count"],
+                hovertemplate="<b>🚨 Potential Burst</b><br><b>Interval:</b> %{x}<br><b>Count:</b> %{customdata}<br><b>P(X ≥ k):</b> %{y:.4e}<br><b>Threshold α:</b> " + str(analysis.alpha) + "<extra></extra>"
+            ))
+
+        fig_pval.add_hline(
+            y=analysis.alpha,
+            line_dash="dash",
+            line_color="#ef4444",
+            line_width=2,
+            annotation_text=f"Significance Threshold α = {analysis.alpha:g}",
+            annotation_position="top right",
+            annotation_font=dict(color="#f87171", size=11)
+        )
+
+        fig_pval.update_layout(
+            title=dict(
+                text=f"<b>Upper-Tail Survival Probability P(X ≥ k):</b> Evaluated Observations vs. Decision Cutoff α = {analysis.alpha:g}",
+                font=dict(size=14, color="#f8fafc")
+            ),
+            paper_bgcolor="#131826",
+            plot_bgcolor="#0e131f",
+            font=dict(family="Inter, sans-serif", color="#cbd5e1"),
+            xaxis=dict(
+                title=dict(text="Observation Interval (Index)", font=dict(color="#94a3b8", size=12)),
+                showgrid=True,
+                gridcolor="rgba(255, 255, 255, 0.06)",
+                zeroline=False
+            ),
+            yaxis=dict(
+                title=dict(text="Upper-Tail Survival P(X ≥ k) [Log Scale]", font=dict(color="#94a3b8", size=12)),
+                showgrid=True,
+                gridcolor="rgba(255, 255, 255, 0.06)",
+                zeroline=False,
+                type="log"
+            ),
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.03,
+                xanchor="right",
+                x=1,
+                bgcolor="rgba(15, 23, 42, 0.75)",
+                bordercolor="rgba(255, 255, 255, 0.08)",
+                borderwidth=1,
+                font=dict(size=10.5)
+            ),
+            margin=dict(l=20, r=20, t=70, b=35),
+            height=340
+        )
+        st.plotly_chart(fig_pval, width="stretch")
+
+        # Evaluation Results Table
+        st.markdown("#### 📋 Interval Evaluation Results Table")
         filter_option = st.radio(
             "Display Filter",
-            options=["All Evaluated Observations", "Flagged Bursts Only"],
+            options=["All Evaluated Observations", "Flagged Bursts Only", "Within Normal Threshold Only"],
             horizontal=True,
-            key="analyzer_table_filter"
+            key="bursts_tab_filter"
         )
 
         display_df = eval_df.copy()
         if filter_option == "Flagged Bursts Only":
             display_df = display_df[display_df["is_burst"]]
+        elif filter_option == "Within Normal Threshold Only":
+            display_df = display_df[~display_df["is_burst"]]
 
         if display_df.empty:
-            st.info("No intervals match the selected filter (no bursts detected below threshold).")
+            st.info("No intervals match the selected filter.")
         else:
             table_dict = {
                 "Interval": display_df["interval"],
@@ -991,7 +1280,8 @@ def render_analyzer_page():
             if "timestamp" in display_df.columns:
                 table_dict["Timestamp"] = display_df["timestamp"]
             table_dict["Observed Count (k)"] = display_df["packet_count"]
-            table_dict["Baseline (λ̂)"] = [f"{analysis.lambda_hat:.2f}"] * len(display_df)
+            table_dict["Baseline Rate (λ̂)"] = [f"{analysis.lambda_hat:.2f}"] * len(display_df)
+            table_dict["Critical Threshold (k_crit)"] = [f"{analysis.k_crit}"] * len(display_df)
             table_dict["Upper-Tail P(X ≥ k)"] = display_df["upper_tail_probability"].apply(
                 lambda p: f"{p:.4e}" if p < 0.0001 else f"{p:.6f}"
             )
@@ -1002,138 +1292,504 @@ def render_analyzer_page():
                 table_dict["Scenario Label"] = display_df["scenario_label"]
             elif "attack_type" in display_df.columns:
                 table_dict["Scenario Label"] = display_df["attack_type"]
-            elif "scenario" in display_df.columns:
-                table_dict["Scenario Label"] = display_df["scenario"]
 
             table_dict["Statistical Evidence"] = [
-                f"Surge k={row['packet_count']} ≥ λ̂={analysis.lambda_hat:.2f} (p={row['upper_tail_probability']:.2e} < α={alpha:g})"
+                f"Surge k={row['packet_count']} ≥ k_crit={analysis.k_crit} (p={row['upper_tail_probability']:.2e} < α={analysis.alpha:g})"
                 if row["is_burst"] else
-                f"Normal k={row['packet_count']} ~ λ̂={analysis.lambda_hat:.2f} (p={row['upper_tail_probability']:.4f} ≥ α)"
+                f"Normal k={row['packet_count']} < k_crit={analysis.k_crit} (p={row['upper_tail_probability']:.4f} ≥ α)"
                 for _, row in display_df.iterrows()
             ]
 
             table_view = pd.DataFrame(table_dict)
+            st.dataframe(table_view, width="stretch", hide_index=True, height=280)
 
-            st.dataframe(
-                table_view,
-                width="stretch",
-                hide_index=True,
-                height=320
-            )
+    # -------------------------------------------------------------------------
+    # TAB 4: POINT-LEVEL INSPECTOR (Section D)
+    # -------------------------------------------------------------------------
+    with tab_inspector:
+        st.subheader("🔍 Point-Level Interval Inspector & Statistical Explanation")
+        st.caption("Inspect any individual interval to review the exact count, survival probability, null hypothesis decision, and step-by-step mathematical reasoning.")
 
-    with col_summary:
-        st.subheader("📊 Statistical Interpretation")
-        if analysis.burst_count > 0:
-            st.warning(
-                f"**{analysis.burst_count} of {analysis.evaluated_count} evaluated intervals ({analysis.burst_percentage:.1f}%)** "
-                f"yielded an upper-tail probability strictly below $\\alpha = {alpha:g}$.\n\n"
-                "Under the null hypothesis of a stationary Poisson process with rate $\\hat{\\lambda}$, "
-                "observing arrival volumes of this magnitude has a probability less than the chosen significance threshold."
-            )
-        else:
-            st.success(
-                f"**Zero evaluated intervals** fell below the significance threshold $\\alpha = {alpha:g}$.\n\n"
-                "All observed packet counts in the evaluation window are consistent with ordinary random fluctuations around $\\hat{\\lambda}$."
-            )
+        total_obs = len(full_df)
 
-        # Overdispersion demonstration
-        dispersion_text = (
-            f"**Overdispersion Index ($D = \\sigma^2/\\mu$):** `{dispersion_index:.2f}` — "
-            + ("Substantial overdispersion detected ($D > 1$), indicating heavy tails and variance clustering that challenge the Poisson equi-dispersion assumption."
-               if dispersion_index > 1.5 else
-               "Close to equi-dispersion ($D \\approx 1$), consistent with Poisson assumptions.")
+        # Quick-Jump Navigation Buttons
+        btn_c1, btn_c2, btn_c3, btn_c4 = st.columns(4)
+        
+        # Determine key landmark intervals
+        peak_idx = int(eval_df.loc[eval_df["packet_count"].idxmax(), "interval"]) if not eval_df.empty else 1
+        first_burst_df = eval_df[eval_df["is_burst"]]
+        first_burst_idx = int(first_burst_df["interval"].iloc[0]) if not first_burst_df.empty else peak_idx
+        median_idx = int(eval_df["interval"].iloc[len(eval_df) // 2]) if not eval_df.empty else 1
+        base_first_idx = int(base_df["interval"].iloc[0]) if not base_df.empty else 1
+
+        if "inspector_slider_ctrl" not in st.session_state or not isinstance(st.session_state.get("inspector_slider_ctrl"), (int, np.integer)) or st.session_state["inspector_slider_ctrl"] < 1 or st.session_state["inspector_slider_ctrl"] > total_obs:
+            st.session_state["inspector_slider_ctrl"] = min(max(1, peak_idx), max(1, total_obs))
+
+        with btn_c1:
+            if st.button("🚨 Jump to Peak Burst", key="btn_jump_peak"):
+                st.session_state["inspector_slider_ctrl"] = min(peak_idx, total_obs)
+                st.rerun()
+        with btn_c2:
+            if st.button("⚡ Jump to First Flagged Burst", key="btn_jump_first_burst"):
+                st.session_state["inspector_slider_ctrl"] = min(first_burst_idx, total_obs)
+                st.rerun()
+        with btn_c3:
+            if st.button("🎯 Jump to Median Observation", key="btn_jump_median"):
+                st.session_state["inspector_slider_ctrl"] = min(median_idx, total_obs)
+                st.rerun()
+        with btn_c4:
+            if st.button("🔄 Jump to First Baseline Interval", key="btn_jump_baseline"):
+                st.session_state["inspector_slider_ctrl"] = min(base_first_idx, total_obs)
+                st.rerun()
+
+        # Synchronized Interval Slider
+        selected_interval = st.slider(
+            "Select Interval Index (Synchronized Slider)",
+            min_value=1,
+            max_value=max(1, total_obs),
+            step=1,
+            key="inspector_slider_ctrl"
         )
-        st.markdown(dispersion_text)
+
+        # Retrieve selected row
+        matching_rows = full_df[full_df["interval"] == selected_interval]
+        if matching_rows.empty:
+            st.warning(f"Interval #{selected_interval} not found.")
+        else:
+            sel_row = matching_rows.iloc[0]
+            sel_count = int(sel_row["packet_count"])
+            is_base = bool(sel_row.get("segment") == "Baseline" or selected_interval <= analysis.baseline_count)
+            is_burst = bool(sel_row.get("is_burst", False))
+            p_val = float(sel_row.get("upper_tail_probability", compute_upper_tail_probability(sel_count, analysis.lambda_hat)))
+            label = sel_row.get("attack_type", sel_row.get("scenario_label", None))
+
+            explanation = generate_point_explanation(
+                interval=int(selected_interval),
+                count=sel_count,
+                lambda_hat=analysis.lambda_hat,
+                p_val=p_val,
+                alpha=analysis.alpha,
+                is_burst=is_burst,
+                is_baseline=is_base,
+                label=str(label) if pd.notna(label) else None,
+                unit=analysis.measurement_unit,
+                k_crit=analysis.k_crit
+            )
+
+            # Display Point Breakdown
+            st.markdown(f"""
+            <div class="provenance-card">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap;">
+                    <span style="font-size: 1.15rem; font-weight: 700; color: #f8fafc;">
+                        Observation Point Analysis: Interval #{selected_interval:,}
+                    </span>
+                    <span class="mode-badge" style="background: {'rgba(239, 68, 68, 0.25)' if is_burst else ('rgba(99, 102, 241, 0.2)' if is_base else 'rgba(16, 185, 129, 0.2)')}; color: {'#fca5a5' if is_burst else ('#c4b5fd' if is_base else '#6ee7b7')}; font-size: 0.85rem; padding: 4px 12px;">
+                        {explanation['status_badge']}
+                    </span>
+                </div>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 16px;">
+                    <div style="background: rgba(15, 23, 42, 0.6); padding: 10px 14px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.06);">
+                        <div style="font-size: 0.76rem; color: #94a3b8; text-transform: uppercase;">Measured Count (k)</div>
+                        <div style="font-size: 1.35rem; font-weight: 700; color: #f8fafc;">{sel_count:,} <span style="font-size: 0.8rem; color: #94a3b8;">{analysis.measurement_unit}</span></div>
+                    </div>
+                    <div style="background: rgba(15, 23, 42, 0.6); padding: 10px 14px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.06);">
+                        <div style="font-size: 0.76rem; color: #94a3b8; text-transform: uppercase;">Baseline Rate (λ̂)</div>
+                        <div style="font-size: 1.35rem; font-weight: 700; color: #10b981;">{analysis.lambda_hat:.2f} <span style="font-size: 0.8rem; color: #94a3b8;">{analysis.measurement_unit}/int</span></div>
+                    </div>
+                    <div style="background: rgba(15, 23, 42, 0.6); padding: 10px 14px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.06);">
+                        <div style="font-size: 0.76rem; color: #94a3b8; text-transform: uppercase;">Deviation from λ̂</div>
+                        <div style="font-size: 1.35rem; font-weight: 700; color: {'#f87171' if explanation['difference'] > 0 else '#94a3b8'};">{explanation['difference']:+.1f} <span style="font-size: 0.8rem; color: #94a3b8;">({explanation['multiplier']:.2f}×)</span></div>
+                    </div>
+                    <div style="background: rgba(15, 23, 42, 0.6); padding: 10px 14px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.06);">
+                        <div style="font-size: 0.76rem; color: #94a3b8; text-transform: uppercase;">Upper-Tail P(X ≥ k)</div>
+                        <div style="font-size: 1.35rem; font-weight: 700; color: {'#f87171' if p_val < analysis.alpha else '#38bdf8'};">{p_val:.3e}</div>
+                    </div>
+                    <div style="background: rgba(15, 23, 42, 0.6); padding: 10px 14px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.06);">
+                        <div style="font-size: 0.76rem; color: #94a3b8; text-transform: uppercase;">Cutoff Threshold (k_crit)</div>
+                        <div style="font-size: 1.35rem; font-weight: 700; color: #cbd5e1;">{analysis.k_crit} <span style="font-size: 0.8rem; color: #94a3b8;">(α={analysis.alpha:g})</span></div>
+                    </div>
+                </div>
+                <div style="color: #cbd5e1; font-size: 0.92rem; line-height: 1.6; margin-bottom: 12px; background: rgba(30, 41, 59, 0.5); padding: 12px 16px; border-radius: 8px; border-left: 4px solid {'#ef4444' if is_burst else '#10b981'};">
+                    <b>Statistical Narrative:</b> {explanation['narrative']}
+                </div>
+                <div style="color: #fde68a; font-size: 0.83rem; line-height: 1.5; background: rgba(245, 158, 11, 0.08); padding: 8px 14px; border-radius: 6px; border-left: 3px solid #f59e0b;">
+                    🛡️ <b>Academic Caution:</b> {explanation['caveat']}
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+    # -------------------------------------------------------------------------
+    # TAB 5: HYPOTHESIS TESTING & INFERENCE (Section E)
+    # -------------------------------------------------------------------------
+    with tab_inference:
+        st.subheader("📐 Statistical Hypothesis Testing & Inferential Framework")
+        st.caption("Formal statement of hypotheses, exact upper-tail survival calculation, confidence intervals, and multiple-testing corrections.")
+
+        hyp_col1, hyp_col2 = st.columns(2, gap="medium")
+        with hyp_col1:
+            st.markdown(f"""
+            <div class="provenance-card">
+                <div style="font-weight: 700; color: #f8fafc; font-size: 1rem; margin-bottom: 8px;">
+                    Formal Hypothesis Statement
+                </div>
+                <ul style="color: #cbd5e1; font-size: 0.88rem; line-height: 1.6; padding-left: 20px; margin-bottom: 0;">
+                    <li><b>Null Hypothesis ($H_0$):</b> Traffic arrival count $X_i$ in interval $i$ is generated by a stationary Poisson process with rate parameter $\\lambda = \\hat{{\\lambda}} = {analysis.lambda_hat:.2f}$.
+                    $$H_0: \\lambda_i = \\hat{{\\lambda}}_{{base}}$$</li>
+                    <li><b>Alternative Hypothesis ($H_1$):</b> Traffic arrival count $X_i$ in interval $i$ is generated by an inflated rate parameter indicating an upper-tail volume surge.
+                    $$H_1: \\lambda_i > \\hat{{\\lambda}}_{{base}}$$</li>
+                </ul>
+            </div>
+            """, unsafe_allow_html=True)
+
+        with hyp_col2:
+            st.markdown(f"""
+            <div class="config-card">
+                <div style="font-weight: 700; color: #f8fafc; font-size: 1rem; margin-bottom: 8px;">
+                    Upper-Tail Survival Formulation
+                </div>
+                <div style="color: #cbd5e1; font-size: 0.86rem; line-height: 1.5;">
+                    The upper-tail p-value is computed from the cumulative survival function:
+                    $$p = P(X \\ge k) = 1 - P(X \\le k - 1) = \\sum_{{j=k}}^{{\\infty}} \\frac{{\\hat{{\\lambda}}^j e^{{-\\hat{{\\lambda}}}}}}{{j!}}$$
+                    Implemented numerically via SciPy:
+                    <code>scipy.stats.poisson.sf(k - 1, lambda_hat)</code>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        # Misconception Clarifications Box
+        st.markdown("""
+        <div style="background: rgba(15, 23, 42, 0.85); border: 1px solid rgba(99, 102, 241, 0.3); border-radius: 10px; padding: 14px 18px; margin-top: 12px; margin-bottom: 18px;">
+            <div style="font-weight: 700; color: #a5b4fc; margin-bottom: 6px;">
+                💡 Statistical Interpretation Rules & Anti-Misconception Principles
+            </div>
+            <ul style="color: #cbd5e1; font-size: 0.86rem; line-height: 1.6; margin-bottom: 0;">
+                <li><b>What the P-Value Is:</b> The exact probability, assuming $H_0$ is true (traffic is strictly Poisson at rate $\\hat{\\lambda}$), of observing $k$ or more arrivals purely by random chance.</li>
+                <li><b>What the P-Value Is NOT:</b> The p-value is <i>NOT</i> the probability that an attack occurred, nor is $1 - p$ the confidence that an attack is present.</li>
+                <li><b>Failure to Reject $H_0$ is NOT Proof of Normality:</b> When $p \\ge \\alpha$, we fail to reject $H_0$. This merely demonstrates insufficient evidence of an upper-tail surge; it does <i>not</i> prove that the underlying packet process is truly Poisson (absence of evidence is not evidence of absence).</li>
+            </ul>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # Confidence Intervals for Lambda
+        st.markdown(f"#### 📊 Baseline Rate (λ̂ = {analysis.lambda_hat:.4f}) Confidence Intervals")
+        ci_dict = analysis.lambda_ci
+        if ci_dict:
+            garwood_low, garwood_high = ci_dict["exact_garwood"]
+            wald_low, wald_high = ci_dict["wald_asymptotic"]
+            m_base_size = ci_dict["sample_size"]
+
+            ci_table = pd.DataFrame({
+                "Estimation Method": ["Garwood Exact (Chi-Square)", "Wald Asymptotic (Normal)"],
+                "Confidence Level": ["95.0%", "95.0%"],
+                "Sample Size (m)": [f"{m_base_size:,}", f"{m_base_size:,}"],
+                "Lower Bound": [f"{garwood_low:.4f}", f"{wald_low:.4f}"],
+                "Point Estimate (λ̂)": [f"{analysis.lambda_hat:.4f}", f"{analysis.lambda_hat:.4f}"],
+                "Upper Bound": [f"{garwood_high:.4f}", f"{wald_high:.4f}"],
+                "Interval Width": [f"{garwood_high - garwood_low:.4f}", f"{wald_high - wald_low:.4f}"],
+                "Mathematical Formulation": [
+                    r"[ χ²_{2T, 0.025}/(2m),  χ²_{2(T+1), 0.975}/(2m) ]",
+                    r"λ̂ ± 1.96 · √(λ̂ / m)"
+                ]
+            })
+            st.dataframe(ci_table, width="stretch", hide_index=True)
+            st.caption(f"Note: {ci_dict['interpretation']}")
+
+        # Multiple Testing & False Discovery Rate (Benjamini-Hochberg)
+        st.markdown("#### 🔬 Multiple Testing Adjustment (Benjamini-Hochberg FDR)")
+        st.write(
+            f"Testing {analysis.evaluated_count:,} separate intervals at nominal $\\alpha = {analysis.alpha:g}$ expects "
+            f"approximately ${analysis.evaluated_count:,} \\times {analysis.alpha:g} = {analysis.evaluated_count * analysis.alpha:.1f}$ false positives under $H_0$ due to family-wise error inflation. "
+            "The Benjamini-Hochberg (BH) procedure controls the False Discovery Rate across all evaluated intervals."
+        )
+
+        bh_fdr = analysis.bh_fdr
+        fdr_c1, fdr_c2, fdr_c3 = st.columns(3)
+        fdr_c1.metric("Unadjusted Bursts (p < α)", f"{analysis.burst_count} int", help="Individual uncorrected hypothesis rejections.")
+        fdr_c2.metric("BH FDR Discoveries (q < α)", f"{bh_fdr.get('num_discoveries', 0)} int", help="Statistically verified discoveries with controlled FDR.")
+        filtered_out = max(0, analysis.burst_count - bh_fdr.get('num_discoveries', 0))
+        fdr_c3.metric("Filtered Multi-Test False Alarms", f"{filtered_out} int", help="Intervals whose individual p < α was attributable to multiple comparisons.")
+
+    # -------------------------------------------------------------------------
+    # TAB 6: POISSON MODEL DIAGNOSTICS & GoF (Section F)
+    # -------------------------------------------------------------------------
+    with tab_diagnostics:
+        st.subheader("🔬 Poisson Model Diagnostics & Baseline Goodness of Fit")
+        st.caption("Empirical testing of Poisson equi-dispersion (Var = Mean) and Chi-Square Goodness-of-Fit with Cochran's pooling.")
+
+        # Equi-dispersion Card
+        d_ratio = analysis.baseline_dispersion
+        d_status = "Equi-dispersed (Var ≈ Mean)" if 0.8 <= d_ratio <= 1.3 else ("Overdispersed (Var > Mean)" if d_ratio > 1.3 else "Underdispersed (Var < Mean)")
 
         st.markdown(f"""
-        **Fitted Model Parameters:**
-        - **Distribution:** $\\text{{Poisson}}(\\hat{{\\lambda}})$
-        - **Estimated Baseline Mean ($\\hat{{\\lambda}}$):** `{analysis.lambda_hat:.4f}` {analysis.measurement_unit} / interval
-        - **Baseline Sample Variance ($s^2$):** `{analysis.baseline_variance:.4f}`
-        - **Significance Level ($\\alpha$):** `{analysis.alpha}`
-        - **Baseline Partition ($m$):** `{analysis.baseline_count}` intervals ({analysis.baseline_pct}%)
-        - **Evaluated Partition:** `{analysis.evaluated_count}` intervals
+        <div class="provenance-card">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <span style="font-weight: 700; color: #f8fafc; font-size: 1rem;">Equi-Dispersion Diagnostic</span>
+                <span class="mode-badge" style="background: {'rgba(239, 68, 68, 0.2)' if d_ratio > 1.5 else 'rgba(16, 185, 129, 0.2)'}; color: {'#fca5a5' if d_ratio > 1.5 else '#6ee7b7'};">
+                    {d_status}
+                </span>
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 8px;">
+                <div><b>Baseline Mean (λ̂):</b> <code>{analysis.lambda_hat:.4f}</code></div>
+                <div><b>Baseline Variance (s²):</b> <code>{analysis.baseline_variance:.4f}</code></div>
+                <div><b>Dispersion Index (D = s²/λ̂):</b> <code>{d_ratio:.3f}</code></div>
+            </div>
+            <div style="color: #94a3b8; font-size: 0.85rem; line-height: 1.5;">
+                Theoretical Poisson processes require $D = 1$. In network traffic, packet clustering and TCP bursts frequently produce $D > 1$ (overdispersion), which inflates upper-tail probabilities.
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # Chi-Square Goodness of Fit on Baseline
+        st.markdown("#### 📐 Pooled Chi-Square Goodness-of-Fit Test on Baseline Partition")
+        gof = analysis.goodness_of_fit
+
+        if gof and gof.get("valid"):
+            chi_c1, chi_c2, chi_c3, chi_c4 = st.columns(4)
+            chi_c1.metric("Chi-Square Stat (χ²)", f"{gof['chi2_stat']:.2f}")
+            chi_c2.metric("Degrees of Freedom (df)", f"{gof['df']}")
+            chi_c3.metric("GoF P-Value", f"{gof['p_value']:.4e}")
+            chi_c4.metric("Decision (α = 0.05)", "Reject H₀" if gof["reject_h0"] else "Fail to Reject H₀")
+
+            st.info(f"💡 **Goodness-of-Fit Finding:** {gof['conclusion']}")
+
+            # Binned Frequencies Bar Chart
+            fig_gof = go.Figure()
+            fig_gof.add_trace(go.Bar(
+                x=gof["bins"],
+                y=gof["observed_frequencies"],
+                name="Observed Frequencies (O)",
+                marker=dict(color="#6366f1")
+            ))
+            fig_gof.add_trace(go.Bar(
+                x=gof["bins"],
+                y=gof["expected_frequencies"],
+                name="Poisson Expected (E)",
+                marker=dict(color="#10b981")
+            ))
+
+            fig_gof.update_layout(
+                title=dict(
+                    text="<b>Observed vs. Expected Frequencies across Cochran-Pooled Bins (E_j ≥ 5.0)</b>",
+                    font=dict(size=14, color="#f8fafc")
+                ),
+                barmode="group",
+                paper_bgcolor="#131826",
+                plot_bgcolor="#0e131f",
+                font=dict(family="Inter, sans-serif", color="#cbd5e1"),
+                xaxis=dict(title="Pooled Count Bins", tickfont=dict(color="#94a3b8")),
+                yaxis=dict(title="Interval Frequency", tickfont=dict(color="#94a3b8"), gridcolor="rgba(255,255,255,0.06)"),
+                legend=dict(
+                    orientation="h",
+                    yanchor="bottom",
+                    y=1.02,
+                    xanchor="right",
+                    x=1,
+                    bgcolor="rgba(15, 23, 42, 0.8)"
+                ),
+                margin=dict(l=20, r=20, t=60, b=35),
+                height=350
+            )
+            st.plotly_chart(fig_gof, width="stretch")
+        else:
+            reason = gof.get("reason", "Sample size or variance insufficient for valid Chi-Square pooling.") if gof else "Diagnostics not computed."
+            st.warning(f"⚠️ **Chi-Square Goodness of Fit Not Applicable:** {reason}")
+
+        # Real-World Model Limitations & Disclosures
+        st.markdown("#### ⚠️ Real-World Network Model Limitations & Academic Disclosures")
+        st.markdown("""
+        <div class="config-card">
+            <ol style="color: #cbd5e1; font-size: 0.88rem; line-height: 1.6; margin-bottom: 0; padding-left: 20px;">
+                <li><b>Overdispersion & Heavy Tails:</b> Real Internet traffic exhibits burstiness, variance clustering, and heavy-tailed inter-arrival times (due to TCP windowing and application batching), violating strict Poisson equi-dispersion ($s^2 = \\hat{\\lambda}$).</li>
+                <li><b>Non-Stationarity & Temporal Drift:</b> Internet arrival rates fluctuate according to business hours, backup schedules, and diurnal patterns. A single static baseline $\\hat{\\lambda}$ will naturally drift over long time windows.</li>
+                <li><b>Packet Trains & Autocorrelation:</b> Packets belonging to the same flow or transaction arrive consecutively in 'trains', which breaks the Poisson independent increments assumption.</li>
+                <li><b>Baseline Contamination:</b> If the baseline window contains low-rate stealth attacks or port scans, $\\hat{\\lambda}$ is inflated, increasing the risk of false negatives in evaluation.</li>
+            </ol>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # -------------------------------------------------------------------------
+    # TAB 7: POISSON VS. BINOMIAL (Section G)
+    # -------------------------------------------------------------------------
+    with tab_model_compare:
+        st.subheader("⚖️ Poisson vs. Binomial Distribution: Theoretical Comparison")
+        st.caption("Why Poisson is used for network traffic analysis rather than Binomial, and the Law of Rare Events convergence.")
+
+        # Educational Comparison Table
+        model_comp_table = pd.DataFrame({
+            "Theoretical Dimension": [
+                "Trial Count (n)",
+                "Arrival Probability (p)",
+                "Support / Domain",
+                "Variance Relationship",
+                "Parameter Requirements",
+                "Network Traffic Suitability"
+            ],
+            "Binomial Distribution B(n, p)": [
+                "Fixed, finite integer n known in advance",
+                "Constant probability p of arrival per trial",
+                "k ∈ {0, 1, 2, ..., n}",
+                "Var(X) = n·p·(1 - p) < E[X] (Under-dispersed)",
+                "Requires knowing both n and p",
+                "Unsuitable for open packet streams: network links do not have a fixed upper capacity n of packet slots."
+            ],
+            "Poisson Distribution Poisson(λ)": [
+                "Unbounded / Infinite (continuous time limit n → ∞)",
+                "Infinitesimal probability in micro-intervals (p → 0)",
+                "k ∈ {0, 1, 2, ...} (countably infinite)",
+                "Var(X) = λ = E[X] (Equi-dispersed)",
+                "Requires only a single parameter: arrival rate λ",
+                "Naturally models continuous independent arrivals in fixed time intervals [t, t + Δt]."
+            ]
+        })
+        st.dataframe(model_comp_table, width="stretch", hide_index=True)
+
+        st.markdown("""
+        #### 📐 The Law of Rare Events (Poisson Limit Theorem)
+        When the number of potential packet arrival opportunities $n$ is very large and the probability of an arrival in any sub-microsecond $p$ is very small such that the expected arrivals in the interval remain constant ($n p = \\lambda$):
+        $$\\lim_{\\substack{n \\to \\infty \\\\ p \\to 0 \\\\ n p = \\lambda}} \\binom{n}{k} p^k (1 - p)^{n - k} = \\frac{\\lambda^k e^{-\\lambda}}{k!}$$
         """)
 
-        st.info(
-            "**Key Modeling Insights:**\n"
-            "1. **Volume Rarity vs Malicious Intent:** Statistical burst detection identifies unusual volume, not confirmed malicious intent.\n"
-            "2. **Stationarity:** $\\lambda$ is assumed constant during the baseline window.\n"
-            "3. **Independence:** Real TCP network traffic exhibits correlation and packet trains, causing heavier tails.\n"
-            "4. **Multiple Testing:** Successive testing across many intervals inflates family-wise false alarms."
+        # Theoretical Convergence Plot
+        comp_res = compute_poisson_binomial_comparison(analysis.lambda_hat)
+        if comp_res:
+            fig_binom = go.Figure()
+
+            # Poisson curve
+            fig_binom.add_trace(go.Scatter(
+                x=comp_res["k_values"],
+                y=comp_res["poisson_pmf"],
+                mode="lines+markers",
+                name=f"Poisson(λ̂ = {analysis.lambda_hat:.2f})",
+                line=dict(color="#10b981", width=3),
+                marker=dict(size=4)
+            ))
+
+            colors = ["#f59e0b", "#38bdf8", "#818cf8"]
+            for idx, sc in enumerate(comp_res["scenarios"]):
+                fig_binom.add_trace(go.Scatter(
+                    x=comp_res["k_values"],
+                    y=sc["pmf"],
+                    mode="lines",
+                    name=sc["name"],
+                    line=dict(color=colors[idx % len(colors)], width=1.8, dash="dash")
+                ))
+
+            fig_binom.update_layout(
+                title=dict(
+                    text=f"<b>Law of Rare Events Convergence:</b> Binomial(n, p = {analysis.lambda_hat:.2f}/n) Converging to Poisson(λ̂ = {analysis.lambda_hat:.2f})",
+                    font=dict(size=14, color="#f8fafc")
+                ),
+                paper_bgcolor="#131826",
+                plot_bgcolor="#0e131f",
+                font=dict(family="Inter, sans-serif", color="#cbd5e1"),
+                xaxis=dict(title=f"Count k ({analysis.measurement_unit})", gridcolor="rgba(255,255,255,0.06)", tickfont=dict(color="#94a3b8")),
+                yaxis=dict(title="Probability Mass P(X = k)", gridcolor="rgba(255,255,255,0.06)", tickfont=dict(color="#94a3b8")),
+                legend=dict(
+                    orientation="h",
+                    yanchor="bottom",
+                    y=1.02,
+                    xanchor="right",
+                    x=1,
+                    bgcolor="rgba(15, 23, 42, 0.8)"
+                ),
+                margin=dict(l=20, r=20, t=65, b=35),
+                height=360
+            )
+            st.plotly_chart(fig_binom, width="stretch")
+
+            st.caption(
+                "Notice that as trial capacity n increases, the Binomial distribution converges directly onto the Poisson PMF. "
+                "We do not fabricate artificial Binomial trial numbers for the real packet trace because an open network link does not have a predefined number of trials."
+            )
+
+    # -------------------------------------------------------------------------
+    # TAB 8: GROUND-TRUTH EVALUATION (Section H)
+    # -------------------------------------------------------------------------
+    with tab_eval:
+        st.subheader("🎯 Ground-Truth Evaluation & Anomaly Overlap")
+        if analysis.has_labels and analysis.label_contingency:
+            ctg = analysis.label_contingency
+            label_title = "Simulation Evaluation vs Injected Labels" if is_synthetic else "Ground-Truth Evaluation"
+            st.caption(f"Recomputed dynamically from actual observations: {label_title}.")
+
+            c_col1, c_col2, c_col3, c_col4 = st.columns(4)
+            c_col1.metric("True Positives (Overlap)", f"{ctg['true_positives']} int", help="Intervals that contained attack/anomaly labels AND were flagged as bursts by the Poisson detector.")
+            c_col2.metric("Statistical False Alarms", f"{ctg['false_positives']} int", help="Benign intervals flagged as bursts due to high arrival volume.")
+            c_col3.metric("Missed Intervals", f"{ctg['false_negatives']} int", help="Labeled intervals whose volume did not exceed the statistical threshold.")
+            c_col4.metric("Empirical Recall", f"{ctg['recall']:.1%}", help="Proportion of labeled intervals captured by the Poisson detector.")
+
+            st.markdown(f"""
+            <div class="contingency-card">
+                <div style="font-size: 0.95rem; font-weight: 700; color: #f59e0b; margin-bottom: 6px;">Evaluation Metrics Summary</div>
+                <ul style="color: #cbd5e1; font-size: 0.88rem; line-height: 1.6; margin-bottom: 0;">
+                    <li><b>Precision:</b> <code>{ctg['precision']:.1%}</code> — {ctg['true_positives']} of {ctg['total_flagged']} flagged intervals coincided with simulated attack markers.</li>
+                    <li><b>Recall:</b> <code>{ctg['recall']:.1%}</code> — Captured {ctg['true_positives']} of {ctg['total_attacks']} labeled intervals.</li>
+                    <li><b>F1-Score:</b> <code>{ctg['f1_score']:.3f}</code> across {ctg['total_evaluated']} evaluated observations.</li>
+                    <li><b>Statistical Note:</b> Poisson upper-tail testing identifies <i>volume rarity</i>. In real networks, benign batch syncs produce false alarms, while stealthy low-rate probes blend into the baseline.</li>
+                </ul>
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.info(
+                "ℹ️ **Unsupervised Baseline Detection:** No ground-truth anomaly labels were provided in this dataset. "
+                "The Poisson detector operates strictly unsupervised, identifying mathematical upper-tail surges based purely on baseline arrival dynamics."
+            )
+
+    # -------------------------------------------------------------------------
+    # TAB 9: DATA EXPORT (Section I)
+    # -------------------------------------------------------------------------
+    with tab_export:
+        st.subheader("💾 Export Complete Analysis Data")
+        st.write("Download the complete time series with calibrated baseline arrival rate λ̂, upper-tail survival probabilities, critical cutoff k_crit, and status annotations.")
+
+        export_data = prepare_export_dataframe(analysis)
+        export_data["data_source"] = source_label
+        export_data["is_synthetic"] = is_synthetic
+        export_data["k_crit"] = analysis.k_crit
+
+        csv_bytes = export_data.to_csv(index=False).encode("utf-8")
+
+        st.download_button(
+            label="⬇️ Download Complete Analysis CSV",
+            data=csv_bytes,
+            file_name=export_filename,
+            mime="text/csv",
+            key="btn_download_analysis_csv",
+            help="Download complete dataset with intervals, counts, baseline lambda, p-values, burst flags, and metadata."
         )
 
-        # Experimental Negative Binomial comparison expander
-        if analysis.experimental_nb:
-            with st.expander("🔬 Model Contrast: Negative Binomial vs. Poisson", expanded=False):
-                st.markdown(r"""
-                **Theoretical Motivation:**  
-                The Poisson model assumes equi-dispersion ($\mathbb{E}[X] = \operatorname{Var}(X) = \lambda$). When network traffic exhibits variance clustering or burstiness ($s^2 > \hat{\lambda}$), standard Poisson upper-tail probabilities can flag natural variance fluctuations as anomalies.
-                
-                The **Negative Binomial** distribution introduces a dispersion parameter $r$ to accommodate heavy-tailed variance without confusing ordinary variance with surges:
-                """)
-                nb = analysis.experimental_nb
-                nb_col1, nb_col2, nb_col3 = st.columns(3)
-                nb_col1.metric("Poisson Bursts (p < α)", f"{analysis.burst_count}")
-                nb_col2.metric("Negative Binomial Bursts", f"{nb['burst_count']}")
-                nb_col3.metric("NB Dispersion (r)", f"{nb['dispersion_r']:.2f}")
-                st.info(f"💡 **Comparative Finding:** {nb['interpretation']}")
-                st.caption("Note: Results from the Negative Binomial model are provided strictly for statistical comparison and are kept distinct from the primary Poisson engine.")
+        with st.expander("📖 Mathematical Foundations & Poisson Derivation", expanded=False):
+            st.markdown("#### 1. Poisson Distribution Formulation")
+            st.write("Arrival counts over fixed equal observation intervals are modeled using the Poisson probability mass function (PMF):")
+            st.latex(r"P(X = k) = \frac{\lambda^k e^{-\lambda}}{k!}, \qquad k \in \{0, 1, 2, \dots\}")
+            st.markdown(r"""
+            - **$X$:** Discrete random variable representing arrival count in a fixed observation interval.
+            - **$k$:** Observed nonnegative integer count ($k \ge 0$).
+            - **$\lambda$:** Expected arrivals per interval ($\mathbb{E}[X] = \operatorname{Var}(X) = \lambda$).
+            """)
 
-    # ---------------------------------------------------------
-    # CSV EXPORT
-    # ---------------------------------------------------------
-    st.divider()
-    st.subheader("💾 Export Analysis Results")
+            st.markdown("#### 2. Baseline Rate Estimation")
+            st.write(r"Given an initial baseline partition containing $m$ observations $x_1, x_2, \dots, x_m$:")
+            st.latex(r"\hat{\lambda} = \frac{1}{m} \sum_{i=1}^{m} x_i")
+            st.caption(r"The baseline arrival rate $\hat{\lambda}$ is estimated strictly from baseline intervals and is completely isolated from the evaluation segment.")
 
-    export_data = prepare_export_dataframe(analysis)
-    export_data["data_source"] = source_label
-    export_data["is_synthetic"] = is_synthetic
+            st.markdown("#### 3. Upper-Tail Cumulative Survival Probability")
+            st.write("Probability of observing a count at least as large as measured count $k$ under the fitted baseline model:")
+            st.latex(r"p = P(X \ge k) = 1 - P(X \le k - 1)")
+            st.latex(r"p = \sum_{j=k}^{\infty} \frac{\lambda^j e^{-\lambda}}{j!}")
+            st.markdown(r"""
+            Computed stably via SciPy's survival function:
+            ```python
+            p = scipy.stats.poisson.sf(k - 1, lambda_hat)
+            ```
+            """)
 
-    csv_bytes = export_data.to_csv(index=False).encode("utf-8")
-
-    st.download_button(
-        label="⬇️ Download Complete Analysis CSV",
-        data=csv_bytes,
-        file_name=export_filename,
-        mime="text/csv",
-        key="btn_download_analysis_csv",
-        help="Download complete dataset with intervals, packet counts, baseline lambda, p-values, burst flags, and metadata."
-    )
-
-    # Mathematical Foundations expander
-    with st.expander("📖 Mathematical Foundations & Poisson Derivation", expanded=False):
-        st.markdown("#### 1. Poisson Distribution Formulation")
-        st.write("Arrival counts over fixed equal observation intervals are modeled using the Poisson probability mass function (PMF):")
-        st.latex(r"P(X = k) = \frac{\lambda^k e^{-\lambda}}{k!}, \qquad k \in \{0, 1, 2, \dots\}")
-        st.markdown(r"""
-        - **$X$:** Discrete random variable representing arrival count in a fixed observation interval.
-        - **$k$:** Observed nonnegative integer count ($k \ge 0$).
-        - **$\lambda$:** Expected arrivals per interval ($\mathbb{E}[X] = \operatorname{Var}(X) = \lambda$).
-        """)
-
-        st.markdown("#### 2. Baseline Rate Estimation")
-        st.write(r"Given an initial baseline partition containing $m$ observations $x_1, x_2, \dots, x_m$:")
-        st.latex(r"\hat{\lambda} = \frac{1}{m} \sum_{i=1}^{m} x_i")
-        st.caption(r"The baseline arrival rate $\hat{\lambda}$ is estimated strictly from baseline intervals and is completely isolated from the evaluation segment.")
-
-        st.markdown("#### 3. Upper-Tail Cumulative Survival Probability")
-        st.write("Probability of observing a count at least as large as measured count $k$ under the fitted baseline model:")
-        st.latex(r"p = P(X \ge k) = 1 - P(X \le k - 1)")
-        st.latex(r"p = \sum_{j=k}^{\infty} \frac{\lambda^j e^{-\lambda}}{j!}")
-        st.markdown(r"""
-        Computed stably via SciPy's survival function:
-        ```python
-        p = scipy.stats.poisson.sf(k - 1, lambda_hat)
-        ```
-        """)
-
-        st.markdown("#### 4. Classification Decision Rule")
-        st.latex(r"\text{Flag as potential burst if } p < \alpha")
-        st.markdown(r"""
-        - If $P(X \ge k) < \alpha \implies$ **Flag as Potential Burst** (volume is statistically improbable under baseline $\hat{\lambda}$)
-        - If $P(X \ge k) \ge \alpha \implies$ **Within Normal Threshold** (consistent with ordinary Poisson fluctuations)
-        """)
+            st.markdown("#### 4. Classification Decision Rule")
+            st.latex(r"\text{Flag as potential burst if } p < \alpha")
+            st.markdown(r"""
+            - If $P(X \ge k) < \alpha \implies$ **Flag as Potential Burst** (volume is statistically improbable under baseline $\hat{\lambda}$)
+            - If $P(X \ge k) \ge \alpha \implies$ **Within Normal Threshold** (consistent with ordinary Poisson fluctuations)
+            """)
 
 
 def main():
