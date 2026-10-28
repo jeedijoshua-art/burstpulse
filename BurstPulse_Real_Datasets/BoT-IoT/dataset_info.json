@@ -1,0 +1,271 @@
+{
+  "dataset_folder": "BoT-IoT",
+  "display_name": "BoT-IoT-style synthetic benchmark",
+  "source_dataset_style": "BoT-IoT-style",
+  "is_synthetic": true,
+  "disclaimer": "SYNTHETIC DATA: generated programmatically for software development, demos, statistical testing and education. Not genuine captured traffic and not a copy of any named research dataset. Attack labels describe simulated scenarios only; a statistical burst detection is not proof of an attack.",
+  "generator_version": "1.0.0",
+  "generation_method": "Low IoT baseline (lambda 12) with a 3-second telemetry burst every 60 s (lambda 30), strong multiplicative flood events (x6..x30) followed by exponential recovery tails.",
+  "random_seed": 20180004,
+  "rng": "numpy.random.default_rng (PCG64)",
+  "row_count": 10000,
+  "interval_seconds": 1,
+  "measurement_unit": "packets_and_flows_per_1s_interval",
+  "row_semantics": "each row = one 1-second interval; packet_count/flow_count are counts within it",
+  "timestamp_start": "2026-04-08T00:00:00+00:00",
+  "timestamp_end": "2026-04-08T02:46:39+00:00",
+  "timezone": "UTC (+00:00)",
+  "baseline_period": {
+    "first_interval": 1,
+    "last_interval": 3000,
+    "rows": 3000,
+    "contains_attack_labels": false,
+    "timestamp_end": "2026-04-08T00:49:59+00:00"
+  },
+  "evaluation_period": {
+    "first_interval": 3001,
+    "last_interval": 10000,
+    "rows": 7000
+  },
+  "packet_count_stats": {
+    "mean": 36.4642,
+    "variance": 4401.6035,
+    "dispersion_index": 120.7103,
+    "min": 2,
+    "max": 864
+  },
+  "flow_count_stats": {
+    "mean": 5.1621,
+    "variance": 72.8261,
+    "dispersion_index": 14.1078,
+    "min": 1,
+    "max": 101
+  },
+  "baseline_packet_count_stats": {
+    "mean": 12.8417,
+    "variance": 28.8922,
+    "dispersion_index": 2.2499,
+    "min": 2,
+    "max": 48
+  },
+  "baseline_flow_count_stats": {
+    "mean": 2.043,
+    "variance": 1.7011,
+    "dispersion_index": 0.8326,
+    "min": 1,
+    "max": 10
+  },
+  "attack_label_intervals": 1418,
+  "attack_label_percentage": 14.18,
+  "scenario_counts": {
+    "attack_burst": 18,
+    "attack_flood": 300,
+    "attack_sustained": 1100,
+    "benign_high_volume": 50,
+    "iot_baseline": 7844,
+    "periodic_iot_activity": 408,
+    "recovery": 280
+  },
+  "attack_type_counts": {
+    "BENIGN": 8582,
+    "SIM_HTTP_Flood_Burst": 10,
+    "SIM_Service_Scan_Flood": 200,
+    "SIM_TCP_Flood_Sustained": 1100,
+    "SIM_UDP_Flood": 108
+  },
+  "overdispersed_scenario_check": null,
+  "injected_events": [
+    {
+      "start": 3000,
+      "length": 100,
+      "kind": "step",
+      "mult": 25.0,
+      "scenario": "attack_flood",
+      "attack": "SIM_UDP_Flood",
+      "phi": 0.0,
+      "rmult": 0.5
+    },
+    {
+      "start": 3100,
+      "length": 40,
+      "kind": "decay",
+      "mult": 5.0,
+      "scenario": "recovery",
+      "attack": null,
+      "phi": 0.0,
+      "rmult": 1.0
+    },
+    {
+      "start": 4200,
+      "length": 500,
+      "kind": "step",
+      "mult": 12.0,
+      "scenario": "attack_sustained",
+      "attack": "SIM_TCP_Flood_Sustained",
+      "phi": 0.0,
+      "rmult": 0.8
+    },
+    {
+      "start": 4700,
+      "length": 60,
+      "kind": "decay",
+      "mult": 4.0,
+      "scenario": "recovery",
+      "attack": null,
+      "phi": 0.0,
+      "rmult": 1.0
+    },
+    {
+      "start": 5600,
+      "length": 10,
+      "kind": "step",
+      "mult": 30.0,
+      "scenario": "attack_burst",
+      "attack": "SIM_HTTP_Flood_Burst",
+      "phi": 0.0,
+      "rmult": 0.4
+    },
+    {
+      "start": 5610,
+      "length": 40,
+      "kind": "decay",
+      "mult": 5.0,
+      "scenario": "recovery",
+      "attack": null,
+      "phi": 0.0,
+      "rmult": 1.0
+    },
+    {
+      "start": 6500,
+      "length": 200,
+      "kind": "step",
+      "mult": 6.0,
+      "scenario": "attack_flood",
+      "attack": "SIM_Service_Scan_Flood",
+      "phi": 0.0,
+      "rmult": 3.0
+    },
+    {
+      "start": 6700,
+      "length": 40,
+      "kind": "decay",
+      "mult": 3.0,
+      "scenario": "recovery",
+      "attack": null,
+      "phi": 0.0,
+      "rmult": 1.0
+    },
+    {
+      "start": 7500,
+      "length": 8,
+      "kind": "step",
+      "mult": 28.0,
+      "scenario": "attack_burst",
+      "attack": "SIM_UDP_Flood",
+      "phi": 0.0,
+      "rmult": 0.5
+    },
+    {
+      "start": 7508,
+      "length": 40,
+      "kind": "decay",
+      "mult": 5.0,
+      "scenario": "recovery",
+      "attack": null,
+      "phi": 0.0,
+      "rmult": 1.0
+    },
+    {
+      "start": 8400,
+      "length": 600,
+      "kind": "step",
+      "mult": 15.0,
+      "scenario": "attack_sustained",
+      "attack": "SIM_TCP_Flood_Sustained",
+      "phi": 0.0,
+      "rmult": 0.8
+    },
+    {
+      "start": 9000,
+      "length": 60,
+      "kind": "decay",
+      "mult": 4.0,
+      "scenario": "recovery",
+      "attack": null,
+      "phi": 0.0,
+      "rmult": 1.0
+    },
+    {
+      "start": 9300,
+      "length": 50,
+      "kind": "step",
+      "mult": 3.5,
+      "scenario": "benign_high_volume",
+      "attack": null,
+      "phi": 0.0,
+      "rmult": 1.0
+    }
+  ],
+  "poisson_demo_support_check": {
+    "alpha": 0.001,
+    "test": "P(X >= k | Poisson(lambda_hat)); lambda_hat = baseline mean",
+    "packet_count": {
+      "baseline_lambda_hat": 12.8417,
+      "attack_interval_recall": 1.0,
+      "attack_interval_precision_among_flagged": 0.8066,
+      "attack_events": 6,
+      "attack_events_with_any_flag": 6,
+      "flags_total": 1758,
+      "stable_benign_false_positive_rate": 0.0367,
+      "stable_benign_intervals": 5252,
+      "benign_high_volume_flag_rate": 1.0,
+      "benign_high_volume_intervals": 50,
+      "flag_rate_by_scenario": {
+        "attack_burst": 1.0,
+        "attack_flood": 1.0,
+        "attack_sustained": 1.0,
+        "benign_high_volume": 1.0,
+        "iot_baseline": 0.0,
+        "periodic_iot_activity": 0.7481,
+        "recovery": 0.3464
+      }
+    },
+    "flow_count": {
+      "baseline_lambda_hat": 2.043,
+      "attack_interval_recall": 0.9965,
+      "attack_interval_precision_among_flagged": 0.9745,
+      "attack_events": 6,
+      "attack_events_with_any_flag": 6,
+      "flags_total": 1450,
+      "stable_benign_false_positive_rate": 0.0027,
+      "stable_benign_intervals": 5252,
+      "benign_high_volume_flag_rate": 0.2,
+      "benign_high_volume_intervals": 50,
+      "flag_rate_by_scenario": {
+        "attack_burst": 1.0,
+        "attack_flood": 0.9967,
+        "attack_sustained": 0.9964,
+        "benign_high_volume": 0.2,
+        "iot_baseline": 0.0004,
+        "periodic_iot_activity": 0.0465,
+        "recovery": 0.0464
+      }
+    }
+  },
+  "dispersion_note": "Whole-file dispersion index is inflated by deliberate non-stationarity (regimes, events). Baseline dispersion is ~1 where the base rate is constant (CIC-IDS2017-, CSE-CIC-IDS2018-style) and >1 where the baseline deliberately includes smooth variation or periodic activity (UNSW-NB15-, BoT-IoT-, TON_IoT-style), so a constant-lambda Poisson baseline is only approximate there.",
+  "label_semantics": "attack labels describe the simulated scenario; a Poisson detection is not proof of an attack.",
+  "columns": {
+    "interval": "1-based consecutive interval index; unique per dataset (one row = one fixed-length time interval).",
+    "timestamp": "ISO 8601 start time of the interval, UTC (+00:00).",
+    "packet_count": "Non-negative integer: packets observed in the interval.",
+    "flow_count": "Non-negative integer: flows started in the interval (never exceeds packet_count).",
+    "measurement_unit": "Explicit unit of packet_count and flow_count, e.g. packets_and_flows_per_1s_interval.",
+    "has_attack_label": "True when the interval belongs to a simulated attack-like scenario (attack_type != BENIGN).",
+    "attack_type": "BENIGN or a SIM_* simulated scenario name.",
+    "scenario": "Traffic scenario category for filtering/analysis (benign high-volume, recovery, overdispersed, etc.).",
+    "scenario_label": "Exact copy of 'scenario'; kept because the BurstPulse app displays a column of this name.",
+    "period": "'baseline' (first 3,000 clean intervals = 30%, for estimating lambda) or 'evaluation'.",
+    "source_dataset_style": "Research-inspired schema/scenario style this synthetic file imitates (NOT its origin).",
+    "is_synthetic": "Always True."
+  }
+}

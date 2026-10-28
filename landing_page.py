@@ -17,6 +17,7 @@ from dataset_registry import (
     DatasetCategory,
     AvailabilityStatus,
     list_datasets,
+    list_builtin_datasets,
     get_dataset
 )
 from case_studies import list_case_studies
@@ -498,20 +499,13 @@ def render_landing_page(on_navigate_to_analyzer: Callable[[Optional[str]], None]
     st.markdown("### 🗂️ 5 Ready-to-Use Built-in Traffic Scenarios")
     st.caption("Locally generated, reproducible traffic demonstration scenarios available immediately in the Analyzer without external downloads.")
 
-    summary_items = [
-        DATASET_REGISTRY.get("normal_network_traffic"),
-        DATASET_REGISTRY.get("network_traffic_with_bursts"),
-        DATASET_REGISTRY.get("port_scan_simulation"),
-        DATASET_REGISTRY.get("ddos_style_traffic_surge"),
-        DATASET_REGISTRY.get("overdispersed_network_traffic")
-    ]
-    summary_items = [d for d in summary_items if d is not None]
+    summary_items = list_builtin_datasets()
 
     for ds in summary_items:
         card_col1, card_col2, card_col3 = st.columns([2.5, 3.5, 1.8], gap="medium")
         with card_col1:
             st.markdown(f"**{ds.name}**")
-            st.markdown(f"<span style='font-size: 0.78rem; color: #818cf8;'>📊 {ds.num_observations} observations</span>", unsafe_allow_html=True)
+            st.markdown(f"<span style='font-size: 0.78rem; color: #818cf8;'>📊 {ds.num_observations:,} observations</span>", unsafe_allow_html=True)
         with card_col2:
             st.markdown(f"<span style='font-size: 0.82rem; color: #cbd5e1;'>🔬 {ds.category.value} · <i>Local Ready</i></span>", unsafe_allow_html=True)
             st.markdown(f"<span style='font-size: 0.78rem; color: #94a3b8;'>{ds.description}</span>", unsafe_allow_html=True)
@@ -520,9 +514,9 @@ def render_landing_page(on_navigate_to_analyzer: Callable[[Optional[str]], None]
             if st.button("⚡ Open in Analyzer", key=btn_key, type="primary", width="stretch"):
                 on_navigate_to_analyzer(ds.id)
             # Backward-compatibility button key for tests
-            if ds.id == "port_scan_simulation":
+            if ds.id in ["port_scan_simulation", "unsw_nb15_style"]:
                 if st.button("⚡ Analyze PortScan", key="btn_analyze_cic_ids_2017_portscan", type="secondary", width="stretch"):
-                    on_navigate_to_analyzer("port_scan_simulation")
+                    on_navigate_to_analyzer(ds.id)
         st.markdown("<hr style='margin: 8px 0; border: none; border-top: 1px solid rgba(148, 163, 184, 0.12);'>", unsafe_allow_html=True)
 
     st.markdown("<div style='height: 1.5rem;'></div>", unsafe_allow_html=True)

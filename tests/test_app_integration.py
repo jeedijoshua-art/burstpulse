@@ -77,11 +77,11 @@ def test_analyzer_has_exactly_five_builtin_datasets_in_dropdown():
     assert len(ds_selector.options) == 5
 
     formatted_options = " ".join(ds_selector.options)
-    assert "Normal Network Traffic" in formatted_options
-    assert "Network Traffic with Bursts" in formatted_options
-    assert "Port Scan Simulation" in formatted_options
-    assert "DDoS-Style Traffic Surge" in formatted_options
-    assert "Overdispersed Network Traffic" in formatted_options
+    assert "cic_ids2017_style" in formatted_options or "CIC-IDS2017" in formatted_options
+    assert "cse_cic_ids2018_style" in formatted_options or "CSE-CIC-IDS2018" in formatted_options
+    assert "unsw_nb15_style" in formatted_options or "UNSW-NB15" in formatted_options
+    assert "bot_iot_style" in formatted_options or "BoT-IoT" in formatted_options
+    assert "ton_iot_style" in formatted_options or "TON_IoT" in formatted_options
 
     # Ensure external research datasets are NOT in the dropdown
     assert "CIC-IDS2017 Research Benchmark" not in formatted_options
@@ -102,7 +102,7 @@ def test_all_five_builtin_datasets_analyze_immediately():
 
         metric_map = {m.label: m.value for m in at.metric}
         assert "Total Observations" in metric_map
-        assert "Total Packets" in metric_map
+        assert "Total Packets" in metric_map or "Total Flows" in metric_map
         assert "Baseline Mean (λ̂)" in metric_map
         assert "Evaluated Intervals" in metric_map
         assert "Potential Bursts" in metric_map
@@ -116,18 +116,18 @@ def test_selecting_dataset_updates_description_without_navigation():
     at.run()
     assert not at.exception
 
-    # Default is normal_network_traffic
-    assert at.selectbox[0].value == "normal_network_traffic"
+    # Default is cic_ids2017_style
+    assert at.selectbox[0].value == "cic_ids2017_style"
 
-    # Switch to DDoS surge (index 3)
+    # Switch to BoT-IoT (index 3)
     at.selectbox[0].select_index(3).run()
     assert not at.exception
 
-    assert at.selectbox[0].value == "ddos_style_traffic_surge"
+    assert at.selectbox[0].value == "bot_iot_style"
     assert any("Network Traffic Burst Analysis" in t.value for t in at.title)
 
     metric_map = {m.label: m.value for m in at.metric}
-    assert metric_map["Total Observations"] == "300 int"
+    assert metric_map["Total Observations"] == "10,000 int"
 
 
 def test_changing_baseline_or_alpha_recalculates_analysis():
@@ -137,21 +137,21 @@ def test_changing_baseline_or_alpha_recalculates_analysis():
     at.run()
     assert not at.exception
 
-    # On normal traffic at alpha=0.01
+    # On normal traffic at alpha=0.001
     initial_bursts = at.metric[4].value  # Potential Bursts
 
     # Set permissive threshold alpha=0.05
     at.select_slider[0].set_value(0.05).run()
     assert not at.exception
 
-    # Change baseline slider from 70% to 90%
+    # Change baseline slider from 30% to 90%
     at.slider[0].set_value(90).run()
     assert not at.exception
 
     metric_map = {m.label: m.value for m in at.metric}
     assert "Baseline Mean (λ̂)" in metric_map
     assert "Evaluated Intervals" in metric_map
-    assert metric_map["Evaluated Intervals"] == "25 int"  # 10% of 250
+    assert metric_map["Evaluated Intervals"] == "1,000 int"  # 10% of 10,000
 
 
 def test_synthetic_labels_preserved_and_contingency_displayed():
@@ -161,8 +161,8 @@ def test_synthetic_labels_preserved_and_contingency_displayed():
     at.run()
     assert not at.exception
 
-    # Select Port Scan Simulation (index 2)
-    at.selectbox[0].select_index(2).run()
+    # Select CIC-IDS2017 (index 0)
+    at.selectbox[0].select_index(0).run()
     assert not at.exception
 
     metric_map = {m.label: m.value for m in at.metric}

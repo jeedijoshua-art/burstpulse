@@ -1,0 +1,40 @@
+BurstPulse synthetic dataset pack - VALIDATION REPORT
+============================================================
+generator_version: 1.0.0
+NOTE: all data is SYNTHETIC; see README.md and DATA_PROVENANCE.json.
+
+[PASS] 1. Required columns present
+        all 5 datasets
+[PASS] 2. Minimum row count (>= 5,000)
+        rows: {'CIC-IDS2017': 10000, 'CSE-CIC-IDS2018': 10000, 'UNSW-NB15': 10000, 'BoT-IoT': 10000, 'TON_IoT': 10000}
+[PASS] 3. Types: ISO 8601 UTC timestamps, integer counts/interval, boolean labels
+        all 5 datasets
+[PASS] 4. No negative or fractional packet/flow counts
+        all 5 datasets
+[PASS] 4b. flow_count <= packet_count, flow_count >= 1 whenever packet_count > 0
+        all 5 datasets
+[PASS] 5. No missing values (any column, incl. empty strings)
+        all 5 datasets
+[PASS] 6. No duplicate interval identifiers (and timestamps)
+        all 5 datasets
+[PASS] 7. Strictly increasing timestamps at the documented interval_seconds; unit matches metadata
+        all 5 datasets
+[PASS] 8. Label values valid: attack_type BENIGN/SIM_*, has_attack_label == (attack_type != BENIGN), documented scenarios, clean baseline
+        all 5 datasets
+[PASS] 9. is_synthetic always True (rows, metadata, style column)
+        all 5 datasets
+[FAIL] 10. Reproducible: two fresh regenerations are byte-identical to files on disk
+        CIC-IDS2017:e4c686f69e48=regen; CSE-CIC-IDS2018:61ce0f7423e2=regen; UNSW-NB15:f0f269894460=regen; BoT-IoT:11030590ab42!=regen; TON_IoT:3d8344c411d9=regen
+[PASS] 11. Catalog, metadata, provenance consistent with CSVs
+        CIC-IDS2017=10000, CSE-CIC-IDS2018=10000, UNSW-NB15=10000, BoT-IoT=10000, TON_IoT=10000
+[PASS] 13. BurstPulse repo compatibility (inspect_schema, prepare_interval_dataset, analyze_traffic @30% baseline)
+        CIC-IDS2017: schema=INTERVAL_COUNTS, baseline=3000, lambda_hat=60.00, bursts=845, labels_detected=True | CSE-CIC-IDS2018: schema=INTERVAL_COUNTS, baseline=3000, lambda_hat=120.04, bursts=3707, labels_detected=True | UNSW-NB15: schema=INTERVAL_COUNTS, baseline=3000, lambda_hat=81.38, bursts=702, labels_detected=True | BoT-IoT: schema=INTERVAL_COUNTS, baseline=3000, lambda_hat=12.84, bursts=1758, labels_detected=True | TON_IoT: schema=INTERVAL_COUNTS, baseline=3000, lambda_hat=34.87, bursts=1333, labels_detected=True
+[FAIL] 12. ZIP created and extracted successfully into a temp dir; contents match source
+        staging archive: corrupt=None, missing=[], extra=['BurstPulse_Real_Datasets/.DS_Store'], files_identical_to_source=True, empty_files=[], extracted_rows={'CIC-IDS2017': 10000, 'CSE-CIC-IDS2018': 10000, 'UNSW-NB15': 10000, 'BoT-IoT': 10000, 'TON_IoT': 10000}; staging size=473099 bytes
+
+Warnings:
+  (none)
+
+Dataset row counts: CIC-IDS2017=10000, CSE-CIC-IDS2018=10000, UNSW-NB15=10000, BoT-IoT=10000, TON_IoT=10000
+
+OVERALL: 2 CHECK(S) FAILED

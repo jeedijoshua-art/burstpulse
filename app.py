@@ -285,9 +285,9 @@ def render_analyzer_page():
         if active_id in DATASET_ALIASES:
             active_id = DATASET_ALIASES[active_id]
         if not active_id or active_id not in builtin_keys:
-            active_id = "normal_network_traffic"
+            active_id = "cic_ids2017_style"
 
-        default_idx = builtin_keys.index(active_id)
+        default_idx = builtin_keys.index(active_id) if active_id in builtin_keys else 0
 
         col_sel, _ = st.columns([2.5, 1.5])
         with col_sel:
@@ -297,7 +297,7 @@ def render_analyzer_page():
                 index=default_idx,
                 format_func=lambda d_id: BUILTIN_DATASETS[d_id].name,
                 key="builtin_dataset_selector",
-                help="Select one of the five verified built-in traffic scenarios."
+                help="Select one of the five verified research-inspired benchmark datasets."
             )
 
         # Synchronize selection
@@ -310,11 +310,15 @@ def render_analyzer_page():
         is_synthetic = True
         export_filename = f"{selected_dataset_id}_results.csv"
 
-        # Load local data immediately
+        # Load local data immediately using robust project root resolution
         try:
-            raw_dataframe = pd.read_csv(active_dataset_entry.local_file_path)
+            target_path = active_dataset_entry.resolved_path
+            if not target_path.exists():
+                raise FileNotFoundError(f"Dataset file `{active_dataset_entry.local_file_path}` was not found on disk.")
+            raw_dataframe = pd.read_csv(target_path)
         except Exception as load_err:
-            st.error(f"❌ Failed to load built-in dataset file `{active_dataset_entry.local_file_path}`: {load_err}")
+            st.error(f"❌ Failed to load built-in dataset `{active_dataset_entry.name}`: {load_err}")
+            st.info("💡 You can select another built-in dataset or upload your own CSV file using the controls above.")
             st.stop()
 
         # Antenna Signal Animation Triggering (State-Aware)
@@ -331,23 +335,30 @@ def render_analyzer_page():
             height=76
         )
 
-        # D. Compact Description Panel
+        # D. Description Panel with Visible Provenance & Measurement Interval
         st.markdown(f"""
         <div class="provenance-card">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                <div style="font-size: 1.12rem; font-weight: 700; color: #f8fafc;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-wrap: wrap; gap: 8px;">
+                <div style="font-size: 1.15rem; font-weight: 700; color: #f8fafc;">
                     {active_dataset_entry.name}
-                    &nbsp;<span class="mode-badge">🔬 Synthetic Simulation</span>
+                    &nbsp;<span class="mode-badge" style="background: rgba(239, 68, 68, 0.15); color: #fca5a5; border-color: rgba(239, 68, 68, 0.35);">🔬 Synthetic Research-Inspired Benchmark</span>
                 </div>
                 <div style="font-size: 0.84rem; color: #94a3b8; font-weight: 600;">
-                    📊 {len(raw_dataframe):,} observations &nbsp;·&nbsp; Ready for Analysis
+                    📊 {len(raw_dataframe):,} observation intervals &nbsp;·&nbsp; {active_dataset_entry.actual_time_resolution}
                 </div>
+            </div>
+            <div style="background: rgba(245, 158, 11, 0.08); border-left: 3px solid #f59e0b; border-radius: 4px; padding: 8px 12px; margin-bottom: 10px; font-size: 0.82rem; color: #fde68a; line-height: 1.45;">
+                <b>⚠️ Synthetic Dataset Disclosure & Provenance:</b> All five benchmark profiles were generated programmatically with fixed random seeds for software development, demos, statistical testing, and educational evaluation. They are <b>NOT</b> genuine downloaded research datasets from the named institutions. Attack labels describe simulated scenarios; statistical burst detection indicates volume rarity, not proof of an attack.
             </div>
             <p style="color: #cbd5e1; font-size: 0.88rem; line-height: 1.5; margin-bottom: 8px;">
                 <b>Scenario Overview:</b> {active_dataset_entry.description}
             </p>
-            <div style="color: #a5b4fc; font-size: 0.84rem; line-height: 1.45; margin-bottom: 8px;">
+            <div style="color: #a5b4fc; font-size: 0.84rem; line-height: 1.45; margin-bottom: 6px;">
                 <b>Expected Analysis:</b> {active_dataset_entry.expected_findings}
+            </div>
+            <div style="color: #94a3b8; font-size: 0.82rem; line-height: 1.4; margin-bottom: 6px;">
+                <b>Measurement Interval & Unit:</b> <code>{active_dataset_entry.measurement_unit}</code> ({active_dataset_entry.actual_time_resolution}) &nbsp;·&nbsp;
+                <b>Clean Baseline:</b> First {active_dataset_entry.clean_baseline_intervals:,} intervals ({active_dataset_entry.clean_baseline_pct}%) reserved for calibration.
             </div>
             <div style="color: #fca5a5; font-size: 0.8rem; line-height: 1.4;">
                 <b>Statistical Limitations:</b> {"; ".join(active_dataset_entry.limitations)}
@@ -493,6 +504,19 @@ def render_analyzer_page():
                     signal_type="upload",
                     height=76
                 )
+
+                # Preprocessing Diagnostics & Pipeline Verification
+                with st.expander("🔍 Preprocessing Diagnostics & Pipeline Verification", expanded=False):
+                    d_c1, d_c2, d_c3, d_c4 = st.columns(4)
+                    d_c1.metric("Input Schema", prep_res.schema_type.value)
+                    d_c2.metric("Source Records", f"{prep_res.source_records:,}")
+                    d_c3.metric("Output Intervals", f"{prep_res.total_intervals:,}")
+                    d_c4.metric("Zero-Filled Gaps", f"{prep_res.zero_count_intervals:,}")
+                    if prep_res.warnings:
+                        for w in prep_res.warnings:
+                            st.warning(f"⚠️ {w}")
+                    else:
+                        st.caption("✅ Temporal order and interval boundaries verified without warnings.")
             except Exception as proc_err:
                 st.error(f"❌ Failed to preprocess uploaded data: {proc_err}")
                 st.stop()
@@ -512,6 +536,24 @@ def render_analyzer_page():
     # E. IN-PAGE ANALYSIS CONFIGURATION
     # ---------------------------------------------------------
     st.subheader("⚙️ Analysis Configuration")
+
+    # Packet versus Flow Selector (Phase 2 & 4)
+    has_flow_col = "flow_count" in raw_dataframe.columns
+    if has_flow_col:
+        selected_metric = st.radio(
+            "Analysis Count Metric",
+            options=["Packet Count (packet_count)", "Flow Count (flow_count)"],
+            index=0,
+            horizontal=True,
+            key="analyzer_metric_target",
+            help="Select whether to evaluate arrival bursts using packet arrivals or flow session counts."
+        )
+        count_col = "flow_count" if "flow_count" in selected_metric else "packet_count"
+        metric_unit_label = "flows" if count_col == "flow_count" else "packets"
+    else:
+        count_col = "packet_count"
+        metric_unit_label = "packets"
+
     cfg_col1, cfg_col2 = st.columns([1.1, 1], gap="large")
 
     with cfg_col1:
@@ -520,25 +562,25 @@ def render_analyzer_page():
             alpha = st.select_slider(
                 "Significance Threshold (α)",
                 options=[0.001, 0.005, 0.01, 0.025, 0.05],
-                value=0.01,
+                value=0.001,
                 format_func=lambda x: f"{x:g} ({x*100:g}%)",
                 key="analyzer_alpha_slider",
                 help="Flag intervals whose upper-tail survival probability P(X ≥ k) under the baseline rate is strictly less than α."
             )
 
         with sub_c2:
-            default_base = 60 if active_dataset_entry and active_dataset_entry.id == "port_scan_simulation" else 70
+            default_base = getattr(active_dataset_entry, "clean_baseline_pct", 30) if active_dataset_entry else 30
             baseline_pct = st.slider(
                 "Baseline Partition (%)",
-                min_value=30,
+                min_value=10,
                 max_value=90,
                 value=default_base,
                 step=5,
                 key="analyzer_baseline_slider",
-                help="Percentage of initial observations strictly reserved for estimating baseline arrival rate λ̂."
+                help="Percentage of initial observations strictly reserved for estimating baseline arrival rate λ̂ (default 30% for benchmark pack)."
             )
 
-    total_raw_obs = len(raw_dataframe) if raw_dataframe is not None else 250
+    total_raw_obs = len(raw_dataframe) if raw_dataframe is not None else 10000
     m_baseline = max(1, int(math.floor(total_raw_obs * (baseline_pct / 100.0))))
     eval_count = total_raw_obs - m_baseline
 
@@ -548,6 +590,9 @@ def render_analyzer_page():
             <div style="font-weight: 700; color: #f8fafc; margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center;">
                 <span>Partition Boundary: {baseline_pct}% Calibration</span>
                 <span class="mode-badge" style="background: rgba(99, 102, 241, 0.2); color: #c4b5fd;">α = {alpha:g} ({alpha*100:g}%)</span>
+            </div>
+            <div style="color: #cbd5e1; font-size: 0.86rem; margin-bottom: 3px;">
+                <b>Target Metric:</b> Evaluating <code>{count_col}</code> ({metric_unit_label})
             </div>
             <div style="color: #cbd5e1; font-size: 0.86rem; margin-bottom: 3px;">
                 <b>Baseline Window:</b> First {m_baseline:,} intervals (1 to {m_baseline}) reserved for λ̂ calibration.
@@ -565,7 +610,13 @@ def render_analyzer_page():
     # F. COMPLETE LIVE RESULTS ON THE SAME SCREEN
     # ---------------------------------------------------------
     try:
-        analysis = analyze_traffic(raw_dataframe, baseline_pct=baseline_pct, alpha=alpha)
+        analysis = analyze_traffic(
+            raw_dataframe,
+            baseline_pct=baseline_pct,
+            alpha=alpha,
+            count_col=count_col,
+            measurement_unit=metric_unit_label
+        )
     except ValueError as val_err:
         st.error(f"❌ **Data Validation Error:** {val_err}")
         st.stop()
@@ -582,6 +633,7 @@ def render_analyzer_page():
     st.markdown(
         f'<div class="status-card">'
         f'<b>Active Data Source:</b> {source_label} &nbsp;·&nbsp; '
+        f'<b>Metric:</b> {count_col} ({metric_unit_label}) &nbsp;·&nbsp; '
         f'<b>Total Intervals:</b> {len(analysis.full_data):,} &nbsp;·&nbsp; '
         f'<b>Baseline Window:</b> First {analysis.baseline_count:,} intervals ({analysis.baseline_pct}%) &nbsp;·&nbsp; '
         f'<b>Evaluated Window:</b> {analysis.evaluated_count:,} intervals &nbsp;·&nbsp; '
@@ -590,6 +642,29 @@ def render_analyzer_page():
         unsafe_allow_html=True
     )
 
+    # Model Suitability Warnings Banner (Phase 4)
+    if analysis.suitability_warnings:
+        for w in analysis.suitability_warnings:
+            st.warning(f"⚠️ **Statistical Model Advisory:** {w}")
+
+    # Baseline & Dispersion Diagnostic Badges
+    st.markdown(f"""
+    <div style="display: flex; gap: 12px; margin-bottom: 14px; flex-wrap: wrap;">
+        <span class="mode-badge" style="background: rgba(99, 102, 241, 0.15); color: #c4b5fd;">
+            Baseline Mean λ̂ = {analysis.lambda_hat:.4f} {analysis.measurement_unit}/int
+        </span>
+        <span class="mode-badge" style="background: rgba(99, 102, 241, 0.15); color: #c4b5fd;">
+            Baseline Variance s² = {analysis.baseline_variance:.4f}
+        </span>
+        <span class="mode-badge" style="background: {'rgba(239, 68, 68, 0.2)' if analysis.baseline_dispersion > 1.5 else 'rgba(16, 185, 129, 0.15)'}; color: {'#fca5a5' if analysis.baseline_dispersion > 1.5 else '#6ee7b7'};">
+            Baseline Dispersion D = {analysis.baseline_dispersion:.2f} ({'Overdispersed (Var > Mean)' if analysis.baseline_dispersion > 1.5 else ('Underdispersed' if analysis.baseline_dispersion < 0.5 else 'Equi-dispersed')})
+        </span>
+        <span class="mode-badge" style="background: rgba(148, 163, 184, 0.12); color: #cbd5e1;">
+            Overall Dispersion D_all = {dispersion_index:.2f}
+        </span>
+    </div>
+    """, unsafe_allow_html=True)
+
     # KPI Metrics Cards (6 metrics)
     kpi1, kpi2, kpi3, kpi4, kpi5, kpi6 = st.columns(6)
     kpi1.metric(
@@ -597,15 +672,16 @@ def render_analyzer_page():
         f"{len(analysis.full_data):,} int",
         help="Total number of discrete time intervals evaluated."
     )
+    metric_kpi_label = "Total Flows" if metric_unit_label == "flows" else "Total Packets"
     kpi2.metric(
-        "Total Packets",
+        metric_kpi_label,
         f"{analysis.total_packets:,}",
-        help="Total packet arrivals summed across all intervals."
+        help=f"Total {metric_unit_label} arrivals summed across all intervals."
     )
     kpi3.metric(
         "Baseline Mean (λ̂)",
-        f"{analysis.lambda_hat:.2f} pkts / int",
-        help=f"Exact baseline arrival rate: {analysis.lambda_hat:.4f} packets per interval."
+        f"{analysis.lambda_hat:.2f} {metric_unit_label}/int",
+        help=f"Exact baseline arrival rate: {analysis.lambda_hat:.4f} {metric_unit_label} per interval."
     )
     kpi4.metric(
         "Evaluated Intervals",
@@ -619,8 +695,8 @@ def render_analyzer_page():
     )
     kpi6.metric(
         "Peak Evaluated Count",
-        f"{analysis.peak_evaluated_count:,} pkts",
-        help="Maximum packet arrival count observed in the evaluation window."
+        f"{analysis.peak_evaluated_count:,} {metric_unit_label}",
+        help=f"Maximum {metric_unit_label} arrival count observed in the evaluation window."
     )
 
     # Interactive Plotly Chart
@@ -734,7 +810,7 @@ def render_analyzer_page():
 
     fig.update_layout(
         title=dict(
-            text="<b>Interval Packet Counts:</b> Baseline Calibration (λ̂) & Upper-Tail Burst Detection (p < α)",
+            text=f"<b>Interval {analysis.measurement_unit.capitalize()} Counts:</b> Baseline Calibration (λ̂) & Upper-Tail Burst Detection (p < α)",
             font=dict(size=15, color="#f8fafc"),
             y=0.96
         ),
@@ -749,7 +825,7 @@ def render_analyzer_page():
             tickfont=dict(color="#94a3b8")
         ),
         yaxis=dict(
-            title=dict(text="Packet Count", font=dict(color="#94a3b8", size=12)),
+            title=dict(text=f"{analysis.measurement_unit.capitalize()} Count", font=dict(color="#94a3b8", size=12)),
             range=[0, y_limit],
             showgrid=True,
             gridcolor="rgba(255, 255, 255, 0.06)",
@@ -773,6 +849,92 @@ def render_analyzer_page():
     )
 
     st.plotly_chart(fig, width="stretch")
+
+    # ---------------------------------------------------------
+    # UPPER-TAIL P-VALUE CHART WITH ALPHA THRESHOLD (Phase 4)
+    # ---------------------------------------------------------
+    st.subheader(f"🎯 Upper-Tail P-Value Evaluation & Significance Threshold (α = {alpha:g})")
+
+    fig_pval = go.Figure()
+    is_burst_mask = eval_df["is_burst"]
+
+    # Non-burst evaluation points
+    non_burst = eval_df[~is_burst_mask]
+    if not non_burst.empty:
+        fig_pval.add_trace(go.Scatter(
+            x=non_burst["interval"],
+            y=non_burst["upper_tail_probability"],
+            mode="markers",
+            name="Within Threshold (p ≥ α)",
+            marker=dict(size=4.5, color="#64748b", opacity=0.75),
+            customdata=non_burst["packet_count"],
+            hovertemplate="<b>Interval:</b> %{x}<br><b>Count:</b> %{customdata}<br><b>P(X ≥ k):</b> %{y:.4e}<br><b>Status:</b> Within threshold<extra></extra>"
+        ))
+
+    # Flagged burst points
+    burst_pts = eval_df[is_burst_mask]
+    if not burst_pts.empty:
+        fig_pval.add_trace(go.Scatter(
+            x=burst_pts["interval"],
+            y=burst_pts["upper_tail_probability"],
+            mode="markers",
+            name=f"Potential Burst (p < {alpha:g})",
+            marker=dict(size=8, color="#ef4444", symbol="x", line=dict(width=1.8, color="#991b1b")),
+            customdata=burst_pts["packet_count"],
+            hovertemplate="<b>🚨 Potential Burst</b><br><b>Interval:</b> %{x}<br><b>Count:</b> %{customdata}<br><b>P(X ≥ k):</b> %{y:.4e}<br><b>Threshold α:</b> " + str(alpha) + "<extra></extra>"
+        ))
+
+    # Threshold horizontal reference line
+    fig_pval.add_hline(
+        y=alpha,
+        line_dash="dash",
+        line_color="#ef4444",
+        line_width=2,
+        annotation_text=f"Significance Threshold α = {alpha:g}",
+        annotation_position="top right",
+        annotation_font=dict(color="#f87171", size=11)
+    )
+
+    fig_pval.update_layout(
+        title=dict(
+            text=f"<b>Upper-Tail Probability P(X ≥ k):</b> Evaluated Observations vs. Decision Threshold α = {alpha:g}",
+            font=dict(size=14.5, color="#f8fafc")
+        ),
+        paper_bgcolor="#131826",
+        plot_bgcolor="#0e131f",
+        font=dict(family="Inter, -apple-system, BlinkMacSystemFont, sans-serif", color="#cbd5e1"),
+        xaxis=dict(
+            title=dict(text="Observation Interval (1-based index)", font=dict(color="#94a3b8", size=12)),
+            showgrid=True,
+            gridcolor="rgba(255, 255, 255, 0.06)",
+            zeroline=False,
+            tickfont=dict(color="#94a3b8")
+        ),
+        yaxis=dict(
+            title=dict(text="Upper-Tail Probability P(X ≥ k) [Log Scale]", font=dict(color="#94a3b8", size=12)),
+            showgrid=True,
+            gridcolor="rgba(255, 255, 255, 0.06)",
+            zeroline=False,
+            tickfont=dict(color="#94a3b8"),
+            type="log"
+        ),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.03,
+            xanchor="right",
+            x=1,
+            bgcolor="rgba(15, 23, 42, 0.75)",
+            bordercolor="rgba(255, 255, 255, 0.08)",
+            borderwidth=1,
+            font=dict(size=10.5, color="#cbd5e1")
+        ),
+        margin=dict(l=20, r=20, t=75, b=35),
+        height=360,
+        hovermode="closest"
+    )
+
+    st.plotly_chart(fig_pval, width="stretch")
 
     # ---------------------------------------------------------
     # CONTINGENCY MATRIX (ONLY WHEN LABELS EXIST)
@@ -825,19 +987,30 @@ def render_analyzer_page():
         else:
             table_dict = {
                 "Interval": display_df["interval"],
-                "Observed Count (k)": display_df["packet_count"],
-                "Baseline (λ̂)": [f"{analysis.lambda_hat:.2f}"] * len(display_df),
-                "Upper-Tail P(X ≥ k)": display_df["upper_tail_probability"].apply(
-                    lambda p: f"{p:.4e}" if p < 0.0001 else f"{p:.6f}"
-                ),
-                "Detection Status": display_df["status"].apply(
-                    lambda s: "🚨 Potential burst" if s == "Potential burst" else "✅ Within threshold"
-                )
             }
-            if "attack_type" in display_df.columns:
-                table_dict["Scenario Label"] = display_df["attack_type"]
-            elif "scenario_label" in display_df.columns:
+            if "timestamp" in display_df.columns:
+                table_dict["Timestamp"] = display_df["timestamp"]
+            table_dict["Observed Count (k)"] = display_df["packet_count"]
+            table_dict["Baseline (λ̂)"] = [f"{analysis.lambda_hat:.2f}"] * len(display_df)
+            table_dict["Upper-Tail P(X ≥ k)"] = display_df["upper_tail_probability"].apply(
+                lambda p: f"{p:.4e}" if p < 0.0001 else f"{p:.6f}"
+            )
+            table_dict["Detection Status"] = display_df["status"].apply(
+                lambda s: "🚨 Potential burst" if s == "Potential burst" else "✅ Within threshold"
+            )
+            if "scenario_label" in display_df.columns:
                 table_dict["Scenario Label"] = display_df["scenario_label"]
+            elif "attack_type" in display_df.columns:
+                table_dict["Scenario Label"] = display_df["attack_type"]
+            elif "scenario" in display_df.columns:
+                table_dict["Scenario Label"] = display_df["scenario"]
+
+            table_dict["Statistical Evidence"] = [
+                f"Surge k={row['packet_count']} ≥ λ̂={analysis.lambda_hat:.2f} (p={row['upper_tail_probability']:.2e} < α={alpha:g})"
+                if row["is_burst"] else
+                f"Normal k={row['packet_count']} ~ λ̂={analysis.lambda_hat:.2f} (p={row['upper_tail_probability']:.4f} ≥ α)"
+                for _, row in display_df.iterrows()
+            ]
 
             table_view = pd.DataFrame(table_dict)
 
@@ -875,7 +1048,8 @@ def render_analyzer_page():
         st.markdown(f"""
         **Fitted Model Parameters:**
         - **Distribution:** $\\text{{Poisson}}(\\hat{{\\lambda}})$
-        - **Estimated Baseline Mean ($\\hat{{\\lambda}}$):** `{analysis.lambda_hat:.4f}` packets / interval
+        - **Estimated Baseline Mean ($\\hat{{\\lambda}}$):** `{analysis.lambda_hat:.4f}` {analysis.measurement_unit} / interval
+        - **Baseline Sample Variance ($s^2$):** `{analysis.baseline_variance:.4f}`
         - **Significance Level ($\\alpha$):** `{analysis.alpha}`
         - **Baseline Partition ($m$):** `{analysis.baseline_count}` intervals ({analysis.baseline_pct}%)
         - **Evaluated Partition:** `{analysis.evaluated_count}` intervals
@@ -883,10 +1057,28 @@ def render_analyzer_page():
 
         st.info(
             "**Key Modeling Insights:**\n"
-            "1. **Stationarity:** $\\lambda$ is assumed constant during the baseline window.\n"
-            "2. **Independence:** Real TCP network traffic exhibits correlation and packet trains, causing heavier tails.\n"
-            "3. **Multiple Testing:** Successive testing across many intervals inflates family-wise false alarms."
+            "1. **Volume Rarity vs Malicious Intent:** Statistical burst detection identifies unusual volume, not confirmed malicious intent.\n"
+            "2. **Stationarity:** $\\lambda$ is assumed constant during the baseline window.\n"
+            "3. **Independence:** Real TCP network traffic exhibits correlation and packet trains, causing heavier tails.\n"
+            "4. **Multiple Testing:** Successive testing across many intervals inflates family-wise false alarms."
         )
+
+        # Experimental Negative Binomial comparison expander
+        if analysis.experimental_nb:
+            with st.expander("🔬 Model Contrast: Negative Binomial vs. Poisson", expanded=False):
+                st.markdown(r"""
+                **Theoretical Motivation:**  
+                The Poisson model assumes equi-dispersion ($\mathbb{E}[X] = \operatorname{Var}(X) = \lambda$). When network traffic exhibits variance clustering or burstiness ($s^2 > \hat{\lambda}$), standard Poisson upper-tail probabilities can flag natural variance fluctuations as anomalies.
+                
+                The **Negative Binomial** distribution introduces a dispersion parameter $r$ to accommodate heavy-tailed variance without confusing ordinary variance with surges:
+                """)
+                nb = analysis.experimental_nb
+                nb_col1, nb_col2, nb_col3 = st.columns(3)
+                nb_col1.metric("Poisson Bursts (p < α)", f"{analysis.burst_count}")
+                nb_col2.metric("Negative Binomial Bursts", f"{nb['burst_count']}")
+                nb_col3.metric("NB Dispersion (r)", f"{nb['dispersion_r']:.2f}")
+                st.info(f"💡 **Comparative Finding:** {nb['interpretation']}")
+                st.caption("Note: Results from the Negative Binomial model are provided strictly for statistical comparison and are kept distinct from the primary Poisson engine.")
 
     # ---------------------------------------------------------
     # CSV EXPORT

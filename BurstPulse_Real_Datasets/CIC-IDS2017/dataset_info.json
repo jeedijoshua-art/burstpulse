@@ -1,0 +1,245 @@
+{
+  "dataset_folder": "CIC-IDS2017",
+  "display_name": "CIC-IDS2017-style synthetic benchmark",
+  "source_dataset_style": "CIC-IDS2017-style",
+  "is_synthetic": true,
+  "disclaimer": "SYNTHETIC DATA: generated programmatically for software development, demos, statistical testing and education. Not genuine captured traffic and not a copy of any named research dataset. Attack labels describe simulated scenarios only; a statistical burst detection is not proof of an attack.",
+  "generator_version": "1.0.0",
+  "generation_method": "Poisson packet counts around a stable lambda=60 baseline, shaped multiplicative events, flows ~ Binomial(packets, flow_ratio).",
+  "random_seed": 20170001,
+  "rng": "numpy.random.default_rng (PCG64)",
+  "row_count": 10000,
+  "interval_seconds": 1,
+  "measurement_unit": "packets_and_flows_per_1s_interval",
+  "row_semantics": "each row = one 1-second interval; packet_count/flow_count are counts within it",
+  "timestamp_start": "2026-01-05T08:00:00+00:00",
+  "timestamp_end": "2026-01-05T10:46:39+00:00",
+  "timezone": "UTC (+00:00)",
+  "baseline_period": {
+    "first_interval": 1,
+    "last_interval": 3000,
+    "rows": 3000,
+    "contains_attack_labels": false,
+    "timestamp_end": "2026-01-05T08:49:59+00:00"
+  },
+  "evaluation_period": {
+    "first_interval": 3001,
+    "last_interval": 10000,
+    "rows": 7000
+  },
+  "packet_count_stats": {
+    "mean": 66.0515,
+    "variance": 546.5245,
+    "dispersion_index": 8.2742,
+    "min": 32,
+    "max": 331
+  },
+  "flow_count_stats": {
+    "mean": 7.5034,
+    "variance": 42.3864,
+    "dispersion_index": 5.649,
+    "min": 1,
+    "max": 61
+  },
+  "baseline_packet_count_stats": {
+    "mean": 60.0043,
+    "variance": 61.0487,
+    "dispersion_index": 1.0174,
+    "min": 32,
+    "max": 89
+  },
+  "baseline_flow_count_stats": {
+    "mean": 5.995,
+    "variance": 6.057,
+    "dispersion_index": 1.0103,
+    "min": 1,
+    "max": 17
+  },
+  "attack_label_intervals": 435,
+  "attack_label_percentage": 4.35,
+  "scenario_counts": {
+    "attack_burst": 45,
+    "attack_window": 390,
+    "benign_high_volume": 135,
+    "gradual_variation": 900,
+    "stable_benign": 8530
+  },
+  "attack_type_counts": {
+    "BENIGN": 9565,
+    "SIM_BruteForce_Window": 150,
+    "SIM_DDoS_Window": 40,
+    "SIM_DoS_Burst": 45,
+    "SIM_PortScan_Window": 200
+  },
+  "overdispersed_scenario_check": null,
+  "injected_events": [
+    {
+      "start": 3200,
+      "length": 900,
+      "kind": "tri",
+      "mult": 1.6,
+      "scenario": "gradual_variation",
+      "attack": null,
+      "phi": 0.0,
+      "rmult": 1.0
+    },
+    {
+      "start": 3050,
+      "length": 40,
+      "kind": "step",
+      "mult": 3.0,
+      "scenario": "attack_window",
+      "attack": "SIM_DDoS_Window",
+      "phi": 0.0,
+      "rmult": 1.5
+    },
+    {
+      "start": 4100,
+      "length": 10,
+      "kind": "step",
+      "mult": 5.0,
+      "scenario": "attack_burst",
+      "attack": "SIM_DoS_Burst",
+      "phi": 0.0,
+      "rmult": 0.6
+    },
+    {
+      "start": 4600,
+      "length": 12,
+      "kind": "step",
+      "mult": 4.5,
+      "scenario": "attack_burst",
+      "attack": "SIM_DoS_Burst",
+      "phi": 0.0,
+      "rmult": 0.6
+    },
+    {
+      "start": 5200,
+      "length": 60,
+      "kind": "step",
+      "mult": 2.2,
+      "scenario": "benign_high_volume",
+      "attack": null,
+      "phi": 0.0,
+      "rmult": 1.0
+    },
+    {
+      "start": 5900,
+      "length": 150,
+      "kind": "step",
+      "mult": 2.0,
+      "scenario": "attack_window",
+      "attack": "SIM_BruteForce_Window",
+      "phi": 0.0,
+      "rmult": 2.5
+    },
+    {
+      "start": 6700,
+      "length": 8,
+      "kind": "step",
+      "mult": 5.5,
+      "scenario": "attack_burst",
+      "attack": "SIM_DoS_Burst",
+      "phi": 0.0,
+      "rmult": 0.6
+    },
+    {
+      "start": 7600,
+      "length": 45,
+      "kind": "step",
+      "mult": 2.6,
+      "scenario": "benign_high_volume",
+      "attack": null,
+      "phi": 0.0,
+      "rmult": 1.0
+    },
+    {
+      "start": 8300,
+      "length": 200,
+      "kind": "step",
+      "mult": 1.7,
+      "scenario": "attack_window",
+      "attack": "SIM_PortScan_Window",
+      "phi": 0.0,
+      "rmult": 4.0
+    },
+    {
+      "start": 9100,
+      "length": 15,
+      "kind": "step",
+      "mult": 4.0,
+      "scenario": "attack_burst",
+      "attack": "SIM_DoS_Burst",
+      "phi": 0.0,
+      "rmult": 0.6
+    },
+    {
+      "start": 9500,
+      "length": 30,
+      "kind": "step",
+      "mult": 3.2,
+      "scenario": "benign_high_volume",
+      "attack": null,
+      "phi": 0.0,
+      "rmult": 1.0
+    }
+  ],
+  "poisson_demo_support_check": {
+    "alpha": 0.001,
+    "test": "P(X >= k | Poisson(lambda_hat)); lambda_hat = baseline mean",
+    "packet_count": {
+      "baseline_lambda_hat": 60.0043,
+      "attack_interval_recall": 0.9747,
+      "attack_interval_precision_among_flagged": 0.5018,
+      "attack_events": 7,
+      "attack_events_with_any_flag": 7,
+      "flags_total": 845,
+      "stable_benign_false_positive_rate": 0.0009,
+      "stable_benign_intervals": 5530,
+      "benign_high_volume_flag_rate": 1.0,
+      "benign_high_volume_intervals": 135,
+      "flag_rate_by_scenario": {
+        "attack_burst": 1.0,
+        "attack_window": 0.9718,
+        "benign_high_volume": 1.0,
+        "gradual_variation": 0.3122,
+        "stable_benign": 0.0009
+      }
+    },
+    "flow_count": {
+      "baseline_lambda_hat": 5.995,
+      "attack_interval_recall": 0.9425,
+      "attack_interval_precision_among_flagged": 0.8316,
+      "attack_events": 7,
+      "attack_events_with_any_flag": 7,
+      "flags_total": 493,
+      "stable_benign_false_positive_rate": 0.0007,
+      "stable_benign_intervals": 5530,
+      "benign_high_volume_flag_rate": 0.4667,
+      "benign_high_volume_intervals": 135,
+      "flag_rate_by_scenario": {
+        "attack_burst": 0.4667,
+        "attack_window": 0.9974,
+        "benign_high_volume": 0.4667,
+        "gradual_variation": 0.0178,
+        "stable_benign": 0.0007
+      }
+    }
+  },
+  "dispersion_note": "Whole-file dispersion index is inflated by deliberate non-stationarity (regimes, events). Baseline dispersion is ~1 where the base rate is constant (CIC-IDS2017-, CSE-CIC-IDS2018-style) and >1 where the baseline deliberately includes smooth variation or periodic activity (UNSW-NB15-, BoT-IoT-, TON_IoT-style), so a constant-lambda Poisson baseline is only approximate there.",
+  "label_semantics": "attack labels describe the simulated scenario; a Poisson detection is not proof of an attack.",
+  "columns": {
+    "interval": "1-based consecutive interval index; unique per dataset (one row = one fixed-length time interval).",
+    "timestamp": "ISO 8601 start time of the interval, UTC (+00:00).",
+    "packet_count": "Non-negative integer: packets observed in the interval.",
+    "flow_count": "Non-negative integer: flows started in the interval (never exceeds packet_count).",
+    "measurement_unit": "Explicit unit of packet_count and flow_count, e.g. packets_and_flows_per_1s_interval.",
+    "has_attack_label": "True when the interval belongs to a simulated attack-like scenario (attack_type != BENIGN).",
+    "attack_type": "BENIGN or a SIM_* simulated scenario name.",
+    "scenario": "Traffic scenario category for filtering/analysis (benign high-volume, recovery, overdispersed, etc.).",
+    "scenario_label": "Exact copy of 'scenario'; kept because the BurstPulse app displays a column of this name.",
+    "period": "'baseline' (first 3,000 clean intervals = 30%, for estimating lambda) or 'evaluation'.",
+    "source_dataset_style": "Research-inspired schema/scenario style this synthetic file imitates (NOT its origin).",
+    "is_synthetic": "Always True."
+  }
+}

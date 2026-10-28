@@ -1,0 +1,36 @@
+{
+  "generator": "generate_datasets.py",
+  "generator_version": "1.0.0",
+  "is_synthetic": true,
+  "statements": [
+    "All five datasets were generated programmatically with fixed random seeds.",
+    "They are NOT genuine downloaded research datasets.",
+    "Folder names indicate research-inspired test profiles only.",
+    "No claim is made that any record originated from the named institutions, testbeds or datasets (CIC-IDS2017, CSE-CIC-IDS2018, UNSW-NB15, BoT-IoT, TON_IoT).",
+    "The data is intended for software development, demos, statistical testing and educational use.",
+    "Genuine research-data validation requires obtaining and processing the original datasets.",
+    "Attack labels describe simulated scenarios; a statistical burst detection is not proof of an attack."
+  ],
+  "datasets": {
+    "CIC-IDS2017": {
+      "seed": 20170001,
+      "rows": 10000
+    },
+    "CSE-CIC-IDS2018": {
+      "seed": 20180002,
+      "rows": 10000
+    },
+    "UNSW-NB15": {
+      "seed": 20150003,
+      "rows": 10000
+    },
+    "BoT-IoT": {
+      "seed": 20180004,
+      "rows": 10000
+    },
+    "TON_IoT": {
+      "seed": 20190005,
+      "rows": 10000
+    }
+  }
+}
